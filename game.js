@@ -368,6 +368,73 @@ function initUI() {
   const cellEls = [];
   const slotEls = Array.from(document.querySelectorAll('.slot'));
 
+  /* ---- Sounds: tiny Web Audio chimes, zero assets.
+     The context is created lazily inside a user gesture (autoplay policy). ---- */
+  const sound = (() => {
+    let ctx = null;
+    let master = null;
+    let muted = false;
+
+    function ensure() {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      if (!ctx) {
+        try {
+          ctx = new AC();
+          master = ctx.createGain();
+          master.gain.value = 0.22;
+          master.connect(ctx.destination);
+        } catch (err) { ctx = null; return null; }
+      }
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      return ctx;
+    }
+
+    function note(freq, at, dur, type, vol, slideTo) {
+      if (muted) return;
+      const c = ensure();
+      if (!c) return;
+      const t = c.currentTime + at;
+      const osc = c.createOscillator();
+      const g = c.createGain();
+      osc.type = type || 'triangle';
+      osc.frequency.setValueAtTime(freq, t);
+      if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(vol || 0.5, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(g);
+      g.connect(master);
+      osc.start(t);
+      osc.stop(t + dur + 0.05);
+    }
+
+    return {
+      unlock: () => { ensure(); },
+      isMuted: () => muted,
+      setMuted: (m) => { muted = m; },
+      toggle: () => { muted = !muted; },
+      pickup: () => note(520, 0, 0.09, 'triangle', 0.35, 760),
+      place: () => { note(300, 0, 0.1, 'triangle', 0.6, 190); note(900, 0, 0.035, 'sine', 0.2); },
+      invalid: () => { note(220, 0, 0.09, 'square', 0.16, 180); note(170, 0.09, 0.13, 'square', 0.16, 140); },
+      clear: (n) => {
+        const run = [523, 659, 784, 1047, 1319];
+        const count = Math.min(run.length, 2 + n);
+        for (let i = 0; i < count; i++) note(run[i], i * 0.06, 0.22, 'triangle', 0.5);
+      },
+      bonus: (lizard) => {
+        const notes = lizard ? [587, 740, 880, 1175, 1480] : [880, 1109, 1319];
+        notes.forEach((f, i) => note(f, i * 0.055, 0.18, 'sine', lizard ? 0.5 : 0.4));
+      },
+      gameOver: () => { [523, 440, 349, 262].forEach((f, i) => note(f, i * 0.16, 0.34, 'sine', 0.4)); },
+      newBest: () => {
+        [523, 659, 784, 1047].forEach((f, i) => note(f, i * 0.09, 0.24, 'triangle', 0.55));
+        note(1319, 0.36, 0.5, 'triangle', 0.6);
+      },
+      tap: () => note(660, 0, 0.05, 'sine', 0.25),
+    };
+  })();
+
   /* ---- Build the 81 cells once ---- */
   (function buildBoard() {
     const frag = document.createDocumentFragment();
@@ -545,6 +612,8 @@ function initUI() {
     const piece = tray[slot];
     if (!piece) return;
     e.preventDefault();
+    sound.unlock();
+    sound.pickup();
 
     drag.active = true;
     drag.pointerId = e.pointerId;
@@ -644,6 +713,7 @@ function initUI() {
 
   function snapBack() {
     endDrag();
+    sound.invalid();
     const slotRect = slotEls[drag.slot].getBoundingClientRect();
     const { x, y } = ghostPos();
     ghostEl.style.transition = 'transform ' + SNAPBACK_MS + 'ms ease, opacity ' + SNAPBACK_MS + 'ms ease';
@@ -733,6 +803,7 @@ function initUI() {
 
     /* ---- DOM phase ---- */
     if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) { /* ignore */ } }
+    sound.place();
     slotEls[slotIdx].textContent = '';
     for (let k = 0; k < placedRender.length; k++) {
       const { idx, icon } = placedRender[k];
@@ -745,10 +816,14 @@ function initUI() {
 
     if (n > 0) {
       showCallouts(n, bonuses);
-      if (bonuses.length && !reducedMotion) {
-        for (const idx of bonusCells) cellEls[idx].classList.add('flash');
-        await wait(FLASH_MS);
+      if (bonuses.length) {
+        sound.bonus(bonuses.some((b) => b.icon === LIZARD_ICON));
+        if (!reducedMotion) {
+          for (const idx of bonusCells) cellEls[idx].classList.add('flash');
+          await wait(FLASH_MS);
+        }
       }
+      sound.clear(n);
       for (const idx of union) {
         const cell = cellEls[idx];
         cell.classList.remove('flash', 'pop');
@@ -857,6 +932,7 @@ function initUI() {
   /* ---- Overlays ---- */
   function showGameOver(newBest) {
     state = 'GAME_OVER';
+    if (newBest) sound.newBest(); else sound.gameOver();
     $('finalScore').textContent = String(score);
     $('finalBest').textContent = String(best);
     $('sweetLine').textContent = SWEET_LINES[(rng() * SWEET_LINES.length) | 0];
@@ -902,16 +978,30 @@ function initUI() {
     state = 'IDLE';
   }
 
-  $('playAgain').addEventListener('click', resetGame);
+  $('playAgain').addEventListener('click', () => { sound.tap(); resetGame(); });
   $('restartBtn').addEventListener('click', () => {
     if (state !== 'IDLE') return;
+    sound.tap();
     confirmEl.hidden = false;
   });
-  $('confirmYes').addEventListener('click', resetGame);
-  $('confirmNo').addEventListener('click', () => { confirmEl.hidden = true; });
+  $('confirmYes').addEventListener('click', () => { sound.tap(); resetGame(); });
+  $('confirmNo').addEventListener('click', () => { sound.tap(); confirmEl.hidden = true; });
+
+  const muteBtn = $('muteBtn');
+  function updateMuteBtn() {
+    muteBtn.textContent = sound.isMuted() ? '\u{1F507}' : '\u{1F50A}';
+    muteBtn.setAttribute('aria-label', sound.isMuted() ? 'Unmute sounds' : 'Mute sounds');
+  }
+  muteBtn.addEventListener('click', () => {
+    sound.toggle();
+    updateMuteBtn();
+    sound.tap();
+    persist();
+  });
 
   splashEl.addEventListener('pointerup', () => {
     if (state !== 'SPLASH') return;
+    sound.unlock();
     splashEl.classList.add('gone');
     setTimeout(() => { splashEl.hidden = true; }, 400);
     state = 'IDLE';
@@ -922,7 +1012,7 @@ function initUI() {
     try {
       const game = state === 'GAME_OVER' || isGameOver(board, tray) ? null
         : encodeSave(best, board, tray, score).game;
-      localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, best, game }));
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, best, muted: sound.isMuted(), game }));
     } catch (err) { /* storage may be unavailable; play on */ }
   }
 
@@ -931,6 +1021,7 @@ function initUI() {
     try { raw = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (err) { raw = null; }
     const save = validateSave(raw);
     best = save.best;
+    sound.setMuted(!!(raw && raw.muted === true));
     if (save.game && !isGameOver(save.game.board, save.game.tray)) {
       board = save.game.board;
       tray = save.game.tray;
@@ -979,4 +1070,5 @@ function initUI() {
   renderBoard();
   renderTray();
   updateScoreDisplay(true);
+  updateMuteBtn();
 }

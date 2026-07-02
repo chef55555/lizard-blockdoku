@@ -183,7 +183,7 @@ header { text-align: center; height: 56px; flex: none; }
 }
 .combo-pill.show { opacity: 1; transform: scale(1); }
 
-#restartBtn {
+#restartBtn, #muteBtn {
   width: 36px;
   height: 36px;
   border-radius: 50%;
@@ -195,7 +195,8 @@ header { text-align: center; height: 56px; flex: none; }
   cursor: pointer;
   flex: none;
 }
-#restartBtn:active { transform: scale(0.92); }
+#muteBtn { font-family: var(--font-emoji); font-size: 15px; }
+#restartBtn:active, #muteBtn:active { transform: scale(0.92); }
 
 /* ---- Board ---- */
 

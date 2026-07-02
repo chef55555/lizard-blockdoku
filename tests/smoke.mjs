@@ -187,6 +187,18 @@ check('restart resets score', (await score()) === 0);
 check('restart clears board', (await filledCount()) === 0);
 check('restart deals a fresh tray', (await page.locator('.slot .piece').count()) === 3);
 
+console.log('7b. Mute toggle persists');
+const MUTED = '\u{1F507}', UNMUTED = '\u{1F50A}';
+check('sound starts unmuted', (await page.locator('#muteBtn').textContent()).includes(UNMUTED));
+await page.tap('#muteBtn');
+check('mute button toggles', (await page.locator('#muteBtn').textContent()).includes(MUTED));
+await page.reload();
+await page.waitForSelector('.cell');
+await dismissSplash();
+check('mute persisted across reload', (await page.locator('#muteBtn').textContent()).includes(MUTED));
+await page.tap('#muteBtn');
+check('unmute works', (await page.locator('#muteBtn').textContent()).includes(UNMUTED));
+
 console.log('8. Landscape browser tab still fits');
 await page.setViewportSize({ width: 844, height: 390 });
 await page.reload();
