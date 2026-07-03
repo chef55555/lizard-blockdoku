@@ -484,6 +484,42 @@ header { text-align: center; height: 56px; flex: none; }
   to { opacity: 0; transform: translateY(-140px); }
 }
 
+/* ---- Escalating celebrations ---- */
+
+.cell.fade-fast { animation: fade-fast 150ms ease-out forwards; }
+@keyframes fade-fast {
+  to { opacity: 0; }
+}
+
+.fx-cell {
+  position: absolute;
+  font-size: calc(var(--cell) * 0.6);
+  font-family: var(--font-emoji);
+  z-index: 12;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.fx-bubble { animation: fx-bubble 620ms ease-out var(--d, 0ms) both; }
+@keyframes fx-bubble {
+  0%   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  60%  { opacity: 0.9; transform: translate(-50%, calc(-50% + var(--dy, -60px) * 0.7)) scale(1.35); }
+  100% { opacity: 0; transform: translate(-50%, calc(-50% + var(--dy, -60px))) scale(0.4); }
+}
+
+.fx-burst { animation: fx-burst 650ms cubic-bezier(0.2, 0.6, 0.4, 1) var(--d, 0ms) both; }
+@keyframes fx-burst {
+  0%   { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--dx, 40px)), calc(-50% + var(--dy, -40px))) scale(0.5) rotate(var(--spin, 180deg)); }
+}
+
+.fx-march { animation: fx-march 850ms ease-in var(--d, 0ms) both; }
+@keyframes fx-march {
+  0%   { opacity: 1; transform: translate(-50%, -50%); }
+  15%  { transform: translate(-50%, calc(-50% - 10px)); }
+  100% { opacity: 0.9; transform: translate(var(--dx, 400px), -50%); }
+}
+
 .particle {
   position: absolute;
   font-size: 13px;

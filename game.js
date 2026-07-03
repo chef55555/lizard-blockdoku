@@ -631,6 +631,11 @@ function initUI() {
       rotate: () => { note(500, 0, 0.06, 'triangle', 0.4, 900); note(700, 0.05, 0.08, 'triangle', 0.35, 1100); },
       undo: () => { note(720, 0, 0.07, 'triangle', 0.4, 480); note(480, 0.06, 0.09, 'triangle', 0.35, 320); },
       freeze: () => { note(1400, 0, 0.08, 'sine', 0.35); note(1100, 0.06, 0.1, 'sine', 0.3); note(880, 0.13, 0.14, 'sine', 0.25); },
+      bubbles: () => { [1250, 980, 760, 610].forEach((f, i) => note(f, i * 0.07, 0.11, 'sine', 0.3, f * 1.4)); },
+      fanfare: () => {
+        [523, 659, 784, 1047].forEach((f, i) => note(f, i * 0.09, 0.2, 'triangle', 0.5));
+        [659, 784, 1319].forEach((f) => note(f, 0.42, 0.55, 'triangle', 0.35));
+      },
     };
   })();
 
@@ -703,7 +708,7 @@ function initUI() {
   function paintCell(idx, icon) {
     const cell = cellEls[idx];
     const ic = cell.firstChild;
-    cell.classList.remove('preview', 'will-clear', 'will-bonus', 'clearing', 'flash', 'pop');
+    cell.classList.remove('preview', 'will-clear', 'will-bonus', 'clearing', 'flash', 'pop', 'fade-fast');
     cell.style.animationDelay = '';
     cell.classList.toggle('frozen', icon >= 0 && !!frozen[idx]);
     if (icon >= 0) {
@@ -1051,6 +1056,7 @@ function initUI() {
 
     /* Capture visuals before mutating further */
     const placedRender = placedIdx.map((idx) => ({ idx, icon: piece.icon }));
+    const unionRender = [...union].map((idx) => ({ idx, icon: board[idx] }));
     const clearDelays = computeClearDelays(units);
     const bonusCells = new Set();
     for (const b of bonuses) for (const idx of b.cells) bonusCells.add(idx);
@@ -1148,14 +1154,22 @@ function initUI() {
         }
       }
       sound.clear(n);
-      for (const idx of union) {
-        const cell = cellEls[idx];
-        cell.classList.remove('flash', 'pop');
-        cell.classList.add('clearing');
-        cell.style.animationDelay = (reducedMotion ? 0 : clearDelays.get(idx)) + 'ms';
+      const tier = reducedMotion ? 0 : celebrationTier(gained);
+      if (tier >= 4) sound.fanfare();
+      else if (tier >= 2) sound.bubbles();
+      if (tier <= 1) {
+        for (const idx of union) {
+          const cell = cellEls[idx];
+          cell.classList.remove('flash', 'pop');
+          cell.classList.add('clearing');
+          cell.style.animationDelay = (reducedMotion ? 0 : clearDelays.get(idx)) + 'ms';
+        }
+        spawnParticles(union);
+        await wait(reducedMotion ? 160 : CLEAR_WAIT);
+      } else {
+        celebrate(tier, unionRender);
+        await wait(tier === 2 ? 550 : tier === 3 ? 650 : 900);
       }
-      spawnParticles(union);
-      await wait(reducedMotion ? 160 : CLEAR_WAIT);
       renderBoard();
     } else {
       await wait(POP_MS + placedRender.length * POP_STAGGER);
@@ -1213,6 +1227,59 @@ function initUI() {
   function cellCenter(idx) {
     const r = Math.floor(idx / N), c = idx % N;
     return { x: (c + 0.5) * cellPx, y: (r + 0.5) * cellPx };
+  }
+
+  /* Clears escalate with the turn's haul: T1 sparkle, T2 bubbles,
+     T3 confetti burst, T4 the whole clear marches off screen. */
+  function celebrationTier(gained) {
+    if (gained >= 260) return 4;
+    if (gained >= 130) return 3;
+    if (gained >= 54) return 2;
+    return 1;
+  }
+
+  /* Tier 2+: the real cells fade fast while up to 30 lightweight clones
+     (transform/opacity only) carry the show. Cleanup on animationend plus
+     a safety sweep in case animations never fire. */
+  function celebrate(tier, unionRender) {
+    const fxHost = $('fxLayer');
+    const boardW = cellPx * N;
+    for (const { idx } of unionRender) {
+      const cell = cellEls[idx];
+      cell.classList.remove('flash', 'pop');
+      cell.classList.add('fade-fast');
+    }
+    const cap = Math.min(30, unionRender.length);
+    const step = unionRender.length / cap;
+    for (let i = 0; i < cap; i++) {
+      const { idx, icon } = unionRender[Math.floor(i * step)];
+      if (icon < 0) continue;
+      const s = document.createElement('span');
+      s.textContent = ICONS[icon];
+      const { x, y } = cellCenter(idx);
+      s.style.left = x + 'px';
+      s.style.top = y + 'px';
+      if (tier === 2) {
+        s.className = 'fx-cell fx-bubble';
+        s.style.setProperty('--dy', -(50 + rng() * 70 | 0) + 'px');
+        s.style.setProperty('--d', (rng() * 160 | 0) + 'ms');
+      } else if (tier === 3) {
+        s.className = 'fx-cell fx-burst';
+        s.style.setProperty('--dx', ((rng() * 160 - 80) | 0) + 'px');
+        s.style.setProperty('--dy', ((rng() * 160 - 110) | 0) + 'px');
+        s.style.setProperty('--spin', ((rng() * 520 - 260) | 0) + 'deg');
+        s.style.setProperty('--d', (rng() * 120 | 0) + 'ms');
+      } else {
+        s.className = 'fx-cell fx-march';
+        s.style.setProperty('--dx', ((boardW - x + 60) | 0) + 'px');
+        s.style.setProperty('--d', ((idx % N) * 28) + 'ms');
+      }
+      s.addEventListener('animationend', () => s.remove());
+      fxHost.appendChild(s);
+    }
+    setTimeout(() => {
+      fxHost.querySelectorAll('.fx-cell').forEach((el) => el.remove());
+    }, 1500);
   }
 
   function spawnParticles(union) {

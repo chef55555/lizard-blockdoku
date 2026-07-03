@@ -380,6 +380,7 @@ await dragPiece(0, 0, 8); // freeze row 0
 await page.waitForTimeout(500);
 await dragPiece(1, 8, 8); // completes col 8: melts as a x2 combo
 await page.waitForTimeout(400);
+check('big clear spawns celebration clones', (await page.locator('.fx-cell').count()) > 0);
 const meltToast = await page.locator('.toast.score-toast').textContent();
 check('melt scores as a merged combo', meltToast.includes('Combo x2') && meltToast.includes('Clear x2'), meltToast);
 check('melt pays the matching sets bonus', meltToast.includes('Matching Sets'), meltToast);
@@ -428,6 +429,34 @@ check('force-melt rescued the game (no game over)', (await page.locator('#gameOv
 check('force-melt cleared the frozen box', (await page.locator('.cell.frozen').count()) === 0
   && (await filledCount()) === 57, 'filled=' + (await filledCount()));
 check('force-melt paid full scoring', (await score()) === 221, 'score=' + (await score()));
+
+console.log('7j. Tier-4 celebration: triple perfect march');
+// Rows 0 and 1 (cols 0-7) and col 8 (rows 3-8) all flowers; Line3-V at
+// (0,8) completes 3 perfect flower sets at once: 3+90+300+100 = +493.
+{
+  const board = new Array(81).fill(-1);
+  for (let c = 0; c < 8; c++) { board[c] = 1; board[9 + c] = 1; }
+  for (let r = 3; r < 9; r++) board[r * 9 + 8] = 1;
+  await injectSave({
+    v: 2, best: 900,
+    game: {
+      board, tray: [{ shapeId: 6, icon: 1 }, { shapeId: 0, icon: 2 }, { shapeId: 0, icon: 3 }],
+      score: 0, inv: { rotate: 0, undo: 0, freeze: 0 }, progress: { pts: 0, combos: 0 },
+    },
+  });
+}
+await dragPiece(0, 0, 8);
+await page.waitForTimeout(350);
+check('tier-4 clear marches off screen', (await page.locator('.fx-march').count()) > 0);
+await page.waitForSelector('#itemHelp:not([hidden])', { timeout: 6000 });
+check('x3 haul first-earns Rotate', (await page.locator('#itemHelpTitle').textContent()).includes('Rotate'));
+await page.tap('#itemHelpOk');
+await page.waitForTimeout(200);
+check('then first-earns Freeze', (await page.locator('#itemHelpTitle').textContent()).includes('Freeze'));
+await page.tap('#itemHelpOk');
+check('triple perfect scored 493', (await score()) === 493, 'score=' + (await score()));
+check('rotate stock from 493 points', (await page.locator('#itemRotate .cnt').textContent()) === '2');
+check('freeze stock capped at 3', (await page.locator('#itemFreeze .cnt').textContent()) === '3');
 
 console.log('8. Landscape browser tab still fits');
 await page.setViewportSize({ width: 844, height: 390 });
