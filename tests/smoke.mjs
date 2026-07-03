@@ -329,6 +329,106 @@ check('undo dismisses game over', (await page.locator('#gameOver.show').count())
 check('board rewound to before the fatal move', (await filledCount()) === 63);
 check('score rewound on game-over undo', (await score()) === 100);
 
+console.log('7h. Items: freeze basics (arm, cancel, dip, melt alone)');
+{
+  const board = new Array(81).fill(-1);
+  [1, 1, 1, 2, 2, 2, 3, 3].forEach((icon, c) => { board[c] = icon; });
+  await injectSave({
+    v: 2, best: 500,
+    game: {
+      board, tray: [{ shapeId: 0, icon: 4 }, { shapeId: 0, icon: 2 }, { shapeId: 1, icon: 3 }],
+      score: 100, inv: { rotate: 0, undo: 0, freeze: 1 }, progress: { pts: 0, combos: 0 },
+    },
+  });
+}
+await page.tap('#itemFreeze');
+check('freeze arms', (await page.locator('#itemFreeze.armed').count()) === 1);
+await page.tap('#itemFreeze');
+check('re-tap cancels arming without consuming', (await page.locator('#itemFreeze.armed').count()) === 0
+  && (await page.locator('#itemFreeze .cnt').textContent()) === '1');
+await page.tap('#itemFreeze');
+await page.locator('.slot').nth(0).tap();
+check('tapping a piece dips it', (await page.locator('.slot .piece.dipped').count()) === 1);
+check('dip consumes the freeze', (await page.locator('#itemFreeze[disabled]').count()) === 1);
+check('dip does not place anything', (await filledCount()) === 8);
+await dragPiece(0, 0, 8); // dipped single completes row 0
+await page.waitForTimeout(500);
+check('completed row froze instead of clearing', (await page.locator('.cell.frozen').count()) === 9);
+check('freeze turn pays placement only', (await score()) === 101);
+await dragPiece(1, 4, 4); // completes nothing new: frozen row melts alone
+await page.waitForTimeout(900);
+check('frozen row melted on the next turn', (await page.locator('.cell.frozen').count()) === 0);
+check('melt cleared the row', (await filledCount()) === 1);
+check('melt paid clear plus icon bonuses', (await score()) === 140, 'score=' + (await score()));
+
+console.log('7i. Freeze: merged combo, refund, game-over rescue');
+{
+  const board = new Array(81).fill(-1);
+  [1, 1, 1, 2, 2, 2, 3, 3].forEach((icon, c) => { board[c] = icon; });
+  for (let r = 1; r <= 7; r++) board[r * 9 + 8] = 2;
+  await injectSave({
+    v: 2, best: 500,
+    game: {
+      board, tray: [{ shapeId: 0, icon: 4 }, { shapeId: 0, icon: 2 }, { shapeId: 1, icon: 3 }],
+      score: 0, inv: { rotate: 0, undo: 0, freeze: 1 }, progress: { pts: 0, combos: 0 },
+    },
+  });
+}
+await page.tap('#itemFreeze');
+await page.locator('.slot').nth(0).tap();
+await dragPiece(0, 0, 8); // freeze row 0
+await page.waitForTimeout(500);
+await dragPiece(1, 8, 8); // completes col 8: melts as a x2 combo
+await page.waitForTimeout(400);
+const meltToast = await page.locator('.toast.score-toast').textContent();
+check('melt scores as a merged combo', meltToast.includes('Combo x2') && meltToast.includes('Clear x2'), meltToast);
+check('melt pays the matching sets bonus', meltToast.includes('Matching Sets'), meltToast);
+check('melt total is placement + clear + bonuses', meltToast.includes('Total+175'), meltToast);
+await page.waitForTimeout(800);
+check('merged melt cleared everything', (await filledCount()) === 0);
+check('score after merged melt', (await score()) === 176, 'score=' + (await score()));
+
+// Refund: a dipped piece that completes nothing returns the item
+{
+  const board = new Array(81).fill(-1);
+  await injectSave({
+    v: 2, best: 500,
+    game: {
+      board, tray: [{ shapeId: 0, icon: 1 }, { shapeId: 0, icon: 2 }, { shapeId: 1, icon: 3 }],
+      score: 0, inv: { rotate: 0, undo: 0, freeze: 1 }, progress: { pts: 0, combos: 0 },
+    },
+  });
+}
+await page.tap('#itemFreeze');
+await page.locator('.slot').nth(0).tap();
+await dragPiece(0, 4, 4); // completes nothing
+await page.waitForTimeout(500);
+check('useless dip is refunded', (await page.locator('#itemFreeze .cnt').textContent()) === '1');
+
+// Game-over force-melt: freezing box 0 leaves no room for the plus5s;
+// the forced melt clears the box and rescues the game.
+{
+  const board = new Array(81).fill(1);
+  for (let r = 0; r < 9; r++) { board[r * 9 + r] = -1; board[r * 9 + ((r + 4) % 9)] = -1; }
+  await injectSave({
+    v: 2, best: 900,
+    game: {
+      board, tray: [{ shapeId: 7, icon: 1 }, { shapeId: 38, icon: 1 }, { shapeId: 38, icon: 1 }],
+      score: 100, inv: { rotate: 0, undo: 0, freeze: 1 }, progress: { pts: 0, combos: 0 },
+    },
+  });
+}
+await page.tap('#itemFreeze');
+await page.locator('.slot').nth(0).tap();
+await dragPiece(0, 0, 0); // dipped Diag3 completes box 0 exactly
+await page.waitForSelector('#itemHelp:not([hidden])', { timeout: 6000 });
+check('force-melt earns a freeze (first-earn card)', (await page.locator('#itemHelpTitle').textContent()).includes('Freeze'));
+await page.tap('#itemHelpOk');
+check('force-melt rescued the game (no game over)', (await page.locator('#gameOver.show').count()) === 0);
+check('force-melt cleared the frozen box', (await page.locator('.cell.frozen').count()) === 0
+  && (await filledCount()) === 57, 'filled=' + (await filledCount()));
+check('force-melt paid full scoring', (await score()) === 221, 'score=' + (await score()));
+
 console.log('8. Landscape browser tab still fits');
 await page.setViewportSize({ width: 844, height: 390 });
 await page.reload();

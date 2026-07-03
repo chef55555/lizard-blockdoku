@@ -334,6 +334,32 @@ header { text-align: center; height: 56px; flex: none; }
   to   { filter: brightness(1.25); }
 }
 
+.cell.will-bonus { animation: willbonus-pulse 700ms ease-in-out infinite alternate; }
+@keyframes willbonus-pulse {
+  from { box-shadow: inset 0 0 0 3px rgba(255, 194, 75, 0.5); }
+  to   { box-shadow: inset 0 0 0 3px rgba(255, 194, 75, 1); }
+}
+
+/* Frozen cells: icy glaze over the normal block, icon kept underneath */
+.cell.frozen::after {
+  content: '❄';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--cell) * 0.5);
+  color: rgba(224, 244, 255, 0.95);
+  background: linear-gradient(145deg, rgba(140, 200, 255, 0.5), rgba(80, 140, 225, 0.42));
+  border-radius: 5px;
+  z-index: 2;
+  animation: frost-shimmer 1.6s ease-in-out infinite alternate;
+}
+@keyframes frost-shimmer {
+  from { opacity: 0.72; }
+  to   { opacity: 1; }
+}
+
 .cell.pop { animation: place-pop 180ms ease-out backwards; }
 @keyframes place-pop {
   0% { transform: scale(0.5); }
@@ -544,6 +570,22 @@ header { text-align: center; height: 56px; flex: none; }
   touch-action: none;
 }
 .rot-btn:active { transform: scale(0.9); }
+
+.item-btn.armed {
+  border-color: #7FC8F5;
+  box-shadow: 0 0 0 3px rgba(127, 200, 245, 0.45);
+  animation: armed-pulse 900ms ease-in-out infinite alternate;
+}
+@keyframes armed-pulse {
+  from { box-shadow: 0 0 0 2px rgba(127, 200, 245, 0.35); }
+  to   { box-shadow: 0 0 0 4px rgba(127, 200, 245, 0.65); }
+}
+
+/* A dipped piece renders as ice until it is placed */
+.piece.dipped .pcell {
+  background: linear-gradient(145deg, #7CC0F2 0%, #3E7BD6 100%);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.5), inset 0 -3px 0 #2B5AA8;
+}
 
 .piece.spin { animation: spin-in 220ms ease; }
 @keyframes spin-in {
@@ -874,6 +916,12 @@ header { text-align: center; height: 56px; flex: none; }
     animation: none;
     box-shadow: inset 0 0 0 999px rgba(201, 166, 245, 0.45);
   }
+  .cell.will-bonus {
+    animation: none;
+    box-shadow: inset 0 0 0 3px rgba(255, 194, 75, 0.8);
+  }
+  .cell.frozen::after { animation: none; }
+  .item-btn.armed { animation: none; }
 }
 @keyframes reduced-clear {
   to { opacity: 0; }

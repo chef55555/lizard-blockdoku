@@ -630,6 +630,7 @@ function initUI() {
       tap: () => note(660, 0, 0.05, 'sine', 0.25),
       rotate: () => { note(500, 0, 0.06, 'triangle', 0.4, 900); note(700, 0.05, 0.08, 'triangle', 0.35, 1100); },
       undo: () => { note(720, 0, 0.07, 'triangle', 0.4, 480); note(480, 0.06, 0.09, 'triangle', 0.35, 320); },
+      freeze: () => { note(1400, 0, 0.08, 'sine', 0.35); note(1100, 0.06, 0.1, 'sine', 0.3); note(880, 0.13, 0.14, 'sine', 0.25); },
     };
   })();
 
@@ -702,8 +703,9 @@ function initUI() {
   function paintCell(idx, icon) {
     const cell = cellEls[idx];
     const ic = cell.firstChild;
-    cell.classList.remove('preview', 'will-clear', 'clearing', 'flash', 'pop');
+    cell.classList.remove('preview', 'will-clear', 'will-bonus', 'clearing', 'flash', 'pop');
     cell.style.animationDelay = '';
+    cell.classList.toggle('frozen', icon >= 0 && !!frozen[idx]);
     if (icon >= 0) {
       cell.classList.add('filled');
       ic.textContent = ICONS[icon];
@@ -717,6 +719,7 @@ function initUI() {
     const shape = SHAPES[piece.shapeId];
     const el = document.createElement('div');
     el.className = 'piece';
+    if (piece.frozen) el.classList.add('dipped');
     el.style.gridTemplateColumns = 'repeat(' + shape.w + ', var(' + cellSizeVar + '))';
     el.style.gridTemplateRows = 'repeat(' + shape.h + ', var(' + cellSizeVar + '))';
     const occupied = new Set(shape.cells.map(([r, c]) => r * shape.w + c));
@@ -823,6 +826,7 @@ function initUI() {
     raf: 0,
     previewCells: [],
     willClearCells: [],
+    willBonusCells: [],
   };
   let snapTimer = 0;
 
@@ -844,6 +848,7 @@ function initUI() {
     if (!piece) return;
     e.preventDefault();
     sound.unlock();
+    if (freezeArming) { dipPiece(slot); return; }
     sound.pickup();
 
     drag.active = true;
@@ -932,6 +937,15 @@ function initUI() {
         drag.willClearCells.push(idx);
       }
     }
+    /* Gold ring on the cells that would pay an icon bonus */
+    if (units.length) {
+      for (const b of iconBonuses(sim, units)) {
+        for (const idx of b.cells) {
+          cellEls[idx].classList.add('will-bonus');
+          drag.willBonusCells.push(idx);
+        }
+      }
+    }
   }
 
   function clearTargetHighlights() {
@@ -941,8 +955,10 @@ function initUI() {
       if (board[idx] === -1) cell.firstChild.textContent = '';
     }
     for (const idx of drag.willClearCells) cellEls[idx].classList.remove('will-clear');
+    for (const idx of drag.willBonusCells) cellEls[idx].classList.remove('will-bonus');
     drag.previewCells = [];
     drag.willClearCells = [];
+    drag.willBonusCells = [];
   }
 
   function endDrag() {
@@ -1011,6 +1027,7 @@ function initUI() {
     undoSnapshot = takeSnapshot({ board, tray, score, inv, progress, frozen, freezeHold });
     const piece = tray[slotIdx];
     const shape = SHAPES[piece.shapeId];
+    const dipped = !!piece.frozen;
 
     /* 1. Commit placement */
     const placedIdx = placePiece(board, shape, row, col, piece.icon);
@@ -1019,9 +1036,18 @@ function initUI() {
     /* 2. Detect ALL full units on the pre-clear snapshot */
     const units = scanUnits(board);
     const n = units.length;
-    const bonuses = n ? iconBonuses(board, units) : [];
-    const msBonuses = n ? matchingSetBonuses(bonuses) : [];
     const union = unionCells(units);
+
+    /* A dipped piece that completes something FREEZES the scan instead of
+       clearing it: placement points only, and the units wait (still full,
+       so the next scan re-finds them) to melt into one bigger combo. A dip
+       that achieved nothing is returned. */
+    const didFreeze = dipped && !freezeHold && n > 0;
+    const freezeRefund = dipped && !didFreeze;
+    if (freezeRefund) inv.freeze = Math.min(ITEM_CAPS.freeze, inv.freeze + 1);
+
+    const bonuses = !didFreeze && n ? iconBonuses(board, units) : [];
+    const msBonuses = !didFreeze && n ? matchingSetBonuses(bonuses) : [];
 
     /* Capture visuals before mutating further */
     const placedRender = placedIdx.map((idx) => ({ idx, icon: piece.icon }));
@@ -1029,19 +1055,30 @@ function initUI() {
     const bonusCells = new Set();
     for (const b of bonuses) for (const idx of b.cells) bonusCells.add(idx);
 
-    /* 3. Clear the union and apply all scoring */
-    for (const idx of union) board[idx] = -1;
-    const gained = shape.cells.length + clearScore(n)
-      + bonuses.reduce((a, b) => a + b.points, 0)
-      + msBonuses.reduce((a, b) => a + b.points, 0);
+    /* 3. Freeze, or clear the union and apply all scoring */
+    let gained;
+    if (didFreeze) {
+      for (const idx of union) frozen[idx] = 1;
+      freezeHold = true;
+      gained = shape.cells.length;
+    } else {
+      for (const idx of union) board[idx] = -1;
+      if (n > 0 && freezeHold) { /* the melt rode along with this scan */
+        frozen = new Uint8Array(CELL_COUNT);
+        freezeHold = false;
+      }
+      gained = shape.cells.length + clearScore(n)
+        + bonuses.reduce((a, b) => a + b.points, 0)
+        + msBonuses.reduce((a, b) => a + b.points, 0);
+    }
     score += gained;
     /* Bank the record immediately so a mid-game restart can never lose it. */
-    const newBest = score > best;
+    let newBest = score > best;
     if (newBest) best = score;
 
     /* Item earning (economy in computeEarned; grants clamp at ITEM_CAPS) */
     const perfectCount = bonuses.filter((b) => b.perfect).length;
-    const earnResult = computeEarned(progress, { gained, comboN: n, perfectCount });
+    const earnResult = computeEarned(progress, { gained, comboN: didFreeze ? 0 : n, perfectCount });
     progress = earnResult.progress;
     const granted = grantItems(inv, earnResult.earned);
 
@@ -1050,7 +1087,38 @@ function initUI() {
     if (refilled) tray = genTray(board, rng);
 
     /* 5. Fit test on the post-clear board */
-    const over = isGameOver(board, tray);
+    let over = isGameOver(board, tray);
+
+    /* A pending freeze force-melts at game over; the space it frees can
+       rescue the game, so the fit test runs again afterwards. */
+    let melt = null;
+    if (over && freezeHold) {
+      const mUnits = scanUnits(board);
+      const mBonuses = iconBonuses(board, mUnits);
+      const mMs = matchingSetBonuses(mBonuses);
+      melt = {
+        n: mUnits.length,
+        union: unionCells(mUnits),
+        delays: computeClearDelays(mUnits),
+        gained: clearScore(mUnits.length)
+          + mBonuses.reduce((a, b) => a + b.points, 0)
+          + mMs.reduce((a, b) => a + b.points, 0),
+      };
+      for (const idx of melt.union) board[idx] = -1;
+      frozen = new Uint8Array(CELL_COUNT);
+      freezeHold = false;
+      score += melt.gained;
+      if (score > best) { best = score; newBest = true; }
+      const meltEarn = computeEarned(progress, {
+        gained: melt.gained,
+        comboN: melt.n,
+        perfectCount: mBonuses.filter((b) => b.perfect).length,
+      });
+      progress = meltEarn.progress;
+      const meltGranted = grantItems(inv, meltEarn.earned);
+      for (const k of Object.keys(granted)) granted[k] += meltGranted[k];
+      over = isGameOver(board, tray);
+    }
 
     /* ---- DOM phase ---- */
     if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) { /* ignore */ } }
@@ -1065,7 +1133,12 @@ function initUI() {
     }
     updateScoreDisplay();
 
-    if (n > 0) {
+    if (didFreeze) {
+      sound.freeze();
+      showToast('item-toast', '❄️ Frozen! Finish another set to melt a big combo');
+      await wait(POP_MS + placedRender.length * POP_STAGGER);
+      renderBoard(); /* paints the icy cells from the mask */
+    } else if (n > 0) {
       showScoreToast(n, shape.cells.length, bonuses, msBonuses, gained);
       if (bonuses.length) {
         sound.bonus(bonuses.some((b) => b.icon === LIZARD_ICON));
@@ -1090,6 +1163,20 @@ function initUI() {
         cellEls[idx].classList.remove('pop');
         cellEls[idx].style.animationDelay = '';
       }
+    }
+    if (freezeRefund) showToast('item-toast', '❄️ Freeze unused, returned');
+
+    /* Rare: the freeze ended the game and force-melted */
+    if (melt) {
+      sound.clear(melt.n);
+      for (const idx of melt.union) {
+        const cell = cellEls[idx];
+        cell.classList.add('clearing');
+        cell.style.animationDelay = (reducedMotion ? 0 : melt.delays.get(idx)) + 'ms';
+      }
+      spawnParticles(melt.union);
+      await wait(reducedMotion ? 160 : CLEAR_WAIT);
+      renderBoard();
     }
 
     renderTray();
@@ -1338,6 +1425,39 @@ function initUI() {
     doUndo();
   });
   $('undoGameOver').addEventListener('click', doUndo);
+
+  /* ---- Freeze: arm from the bar, then tap a tray piece to dip it ---- */
+  let freezeArming = false;
+
+  function setArming(on) {
+    freezeArming = on;
+    itemBtns.freeze.classList.toggle('armed', on);
+  }
+
+  itemBtns.freeze.addEventListener('click', () => {
+    if (state !== 'IDLE') return;
+    if (freezeArming) {
+      setArming(false);
+      showToast('item-toast', '❄️ Freeze canceled');
+      return;
+    }
+    if (inv.freeze <= 0) return;
+    if (freezeHold) { showToast('item-toast', '❄️ A freeze is already waiting to melt'); return; }
+    if (tray.some((p) => p && p.frozen)) { showToast('item-toast', '❄️ A piece is already dipped'); return; }
+    setArming(true);
+    showToast('item-toast', '❄️ Tap a tray piece to dip it in ice');
+  });
+
+  function dipPiece(slot) {
+    setArming(false);
+    if (state !== 'IDLE' || inv.freeze <= 0 || !tray[slot]) return;
+    inv.freeze--;
+    tray[slot] = { ...tray[slot], frozen: true };
+    sound.freeze();
+    renderTray();
+    updateItemsBar();
+    persist();
+  }
 
   /* ---- Overlays ---- */
   function showGameOver(newBest) {
