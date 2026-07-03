@@ -1,9 +1,11 @@
 'use strict';
 
 /* ================================================================
-   Lizard's Blockdoku
+   Lizard Block Mania
    A gift for Lizard, made with love.
    Pure game logic first (Node-testable), then the browser UI.
+   (Internal identifiers keep the historical lizard-blockdoku name:
+   renaming the repo/URL or storage keys would break her install.)
    ================================================================ */
 
 const PLAYER_NAME = 'Lizard';
