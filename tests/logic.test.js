@@ -298,24 +298,65 @@ test('isGameOver: false while any piece fits, true when none does', () => {
 
 /* ---- Persistence ---- */
 
-test('save round-trip preserves board, tray, score, best', () => {
+test('save v2 round-trip preserves everything', () => {
   const rng = mulberry32(2024);
   const b = G.emptyBoard();
   G.placePiece(b, G.SHAPES[13], 3, 3, 2);
-  const tray = [G.makePiece(rng), null, G.makePiece(rng)];
-  const encoded = G.encodeSave(777, b, tray, 123);
-  const decoded = G.validateSave(JSON.parse(JSON.stringify(encoded)));
+  const frozen = new Uint8Array(81);
+  frozen[3 * 9 + 3] = 1;
+  const tray = [{ ...G.makePiece(rng), frozen: true }, null, G.makePiece(rng)];
+  const game = G.encodeGame({
+    board: b, tray, score: 123,
+    inv: { rotate: 2, undo: 1, freeze: 3 },
+    progress: { pts: 150, combos: 1 },
+    frozen, freezeHold: true,
+  });
+  const decoded = G.validateSave(JSON.parse(JSON.stringify({
+    v: 2, best: 777, muted: true, volume: 30, theme: 'dark', nickname: 'Lizard 🦎',
+    seenTutorial: true, tutorialOffered: true,
+    itemHelp: { rotate: true, undo: false, freeze: true },
+    game,
+  })));
   assert.strictEqual(decoded.best, 777);
+  assert.strictEqual(decoded.muted, true);
+  assert.strictEqual(decoded.volume, 30);
+  assert.strictEqual(decoded.theme, 'dark');
+  assert.strictEqual(decoded.nickname, 'Lizard 🦎');
+  assert.strictEqual(decoded.seenTutorial, true);
+  assert.strictEqual(decoded.tutorialOffered, true);
+  assert.deepStrictEqual(decoded.itemHelp, { rotate: true, undo: false, freeze: true });
   assert.ok(decoded.game);
   assert.deepStrictEqual(Array.from(decoded.game.board), Array.from(b));
   assert.deepStrictEqual(decoded.game.tray, tray);
   assert.strictEqual(decoded.game.score, 123);
+  assert.deepStrictEqual(decoded.game.inv, { rotate: 2, undo: 1, freeze: 3 });
+  assert.deepStrictEqual(decoded.game.progress, { pts: 150, combos: 1 });
+  assert.deepStrictEqual(Array.from(decoded.game.frozen), Array.from(frozen));
+  assert.strictEqual(decoded.game.freezeHold, true);
 });
 
-test('validateSave: corrupt payloads keep best, drop game', () => {
-  assert.deepStrictEqual(G.validateSave(null), { best: 0, game: null });
-  assert.deepStrictEqual(G.validateSave('junk'), { best: 0, game: null });
-  assert.deepStrictEqual(G.validateSave({ v: 1, best: 42 }), { best: 42, game: null });
+test('validateSave: v1 saves migrate to v2 defaults', () => {
+  const goodBoard = new Array(81).fill(-1);
+  goodBoard[0] = 1;
+  const v1 = { v: 1, best: 42, muted: true, game: { board: goodBoard, tray: [{ shapeId: 0, icon: 1 }, null, null], score: 9 } };
+  const out = G.validateSave(v1);
+  assert.strictEqual(out.best, 42);
+  assert.strictEqual(out.muted, true);
+  assert.strictEqual(out.volume, 50, 'default volume');
+  assert.strictEqual(out.theme, 'auto', 'default theme');
+  assert.strictEqual(out.nickname, '');
+  assert.strictEqual(out.seenTutorial, false);
+  assert.ok(out.game, 'v1 game survives migration');
+  assert.deepStrictEqual(out.game.inv, { rotate: 0, undo: 0, freeze: 0 });
+  assert.deepStrictEqual(out.game.progress, { pts: 0, combos: 0 });
+  assert.strictEqual(out.game.freezeHold, false);
+  assert.strictEqual(Array.from(out.game.frozen).reduce((a, x) => a + x, 0), 0);
+});
+
+test('validateSave: corrupt payloads keep meta, drop game', () => {
+  assert.strictEqual(G.validateSave(null).game, null);
+  assert.strictEqual(G.validateSave('junk').best, 0);
+  assert.strictEqual(G.validateSave({ v: 1, best: 42 }).best, 42);
 
   const bad1 = G.validateSave({ v: 1, best: 10, game: { board: [1, 2, 3], tray: [null, null, null], score: 5 } });
   assert.strictEqual(bad1.best, 10);
@@ -335,6 +376,204 @@ test('validateSave: corrupt payloads keep best, drop game', () => {
 
   const bad5 = G.validateSave({ v: 1, best: -5, game: null });
   assert.strictEqual(bad5.best, 0, 'negative best rejected');
+});
+
+test('validateSave: hostile v2 fields', () => {
+  const filled = new Array(81).fill(1);
+  const base = { v: 2, best: 10, game: { board: filled.slice(), tray: [{ shapeId: 0, icon: 1 }, null, null], score: 5 } };
+
+  const overCap = G.validateSave({ ...base, game: { ...base.game, inv: { rotate: 99, undo: -3, freeze: 2 } } });
+  assert.ok(overCap.game);
+  assert.deepStrictEqual(overCap.game.inv, { rotate: G.ITEM_CAPS.rotate, undo: 0, freeze: 2 }, 'inv clamped to caps');
+
+  const badFrozenIdx = G.validateSave({ ...base, game: { ...base.game, frozen: [81] } });
+  assert.strictEqual(badFrozenIdx.game, null, 'frozen index out of range rejected');
+
+  const empty = new Array(81).fill(-1);
+  const frozenOnEmpty = G.validateSave({ v: 2, best: 1, game: { board: empty, tray: [{ shapeId: 0, icon: 1 }, null, null], score: 5, frozen: [4] } });
+  assert.strictEqual(frozenOnEmpty.game, null, 'frozen cell must be filled');
+
+  const holdNoFrozen = G.validateSave({ ...base, game: { ...base.game, freezeHold: true } });
+  assert.strictEqual(holdNoFrozen.game, null, 'freezeHold without frozen cells rejected');
+
+  const badTheme = G.validateSave({ v: 2, best: 1, theme: 'neon', volume: 400, game: null });
+  assert.strictEqual(badTheme.theme, 'auto');
+  assert.strictEqual(badTheme.volume, 50);
+
+  const evilName = G.validateSave({ v: 2, best: 1, nickname: '  <b>Liz</b>​  zard  ', game: null });
+  assert.strictEqual(evilName.nickname, 'bLiz/b zard');
+});
+
+/* ---- Matching Sets bonus ---- */
+
+test('matchingSetsTier: 0/50/100/200 ladder', () => {
+  assert.strictEqual(G.matchingSetsTier(0), 0);
+  assert.strictEqual(G.matchingSetsTier(1), 0);
+  assert.strictEqual(G.matchingSetsTier(2), 50);
+  assert.strictEqual(G.matchingSetsTier(3), 100);
+  assert.strictEqual(G.matchingSetsTier(4), 200);
+  assert.strictEqual(G.matchingSetsTier(9), 200);
+});
+
+function msFromBoard(b) {
+  const units = G.scanUnits(b);
+  return G.matchingSetBonuses(G.iconBonuses(b, units));
+}
+
+test('matchingSetBonuses: two rows with 3+ of the same icon pay 50', () => {
+  const cells = [];
+  for (let c = 0; c < 9; c++) { cells.push([0, c]); cells.push([4, c]); }
+  const b = G.emptyBoard();
+  /* rows 0 and 4: three flowers (icon 1) each, rest mixed */
+  [1, 1, 1, 2, 3, 4, 2, 3, 4].forEach((icon, c) => { b[c] = icon; });
+  [1, 1, 1, 3, 2, 4, 3, 2, 4].forEach((icon, c) => { b[4 * 9 + c] = icon; });
+  const ms = msFromBoard(b);
+  assert.strictEqual(ms.length, 1);
+  assert.strictEqual(ms[0].icon, 1);
+  assert.strictEqual(ms[0].unitCount, 2);
+  assert.strictEqual(ms[0].points, 50);
+});
+
+test('matchingSetBonuses: lizard doubling and higher tiers', () => {
+  const b = G.emptyBoard();
+  [0, 0, 0, 2, 3, 4, 2, 3, 4].forEach((icon, c) => { b[c] = icon; });
+  [0, 0, 0, 3, 2, 4, 3, 2, 4].forEach((icon, c) => { b[4 * 9 + c] = icon; });
+  const ms = msFromBoard(b);
+  assert.strictEqual(ms[0].points, 100, 'lizard k=2 doubles 50 to 100');
+
+  const b3 = G.emptyBoard();
+  for (const row of [0, 4, 8]) {
+    [2, 2, 2, 1, 3, 4, 1, 3, 4].forEach((icon, c) => { b3[row * 9 + c] = icon; });
+  }
+  const ms3 = msFromBoard(b3);
+  assert.strictEqual(ms3[0].unitCount, 3);
+  assert.strictEqual(ms3[0].points, 100);
+});
+
+test('matchingSetBonuses: no bonus for different icons or a single unit', () => {
+  const b = G.emptyBoard();
+  [1, 1, 1, 2, 3, 4, 2, 3, 4].forEach((icon, c) => { b[c] = icon; });          /* flowers */
+  [2, 2, 2, 3, 1, 4, 3, 1, 4].forEach((icon, c) => { b[4 * 9 + c] = icon; });  /* hearts */
+  assert.deepStrictEqual(msFromBoard(b), [], 'different icons never pair');
+
+  const single = G.emptyBoard();
+  [1, 1, 1, 2, 2, 2, 3, 3, 4].forEach((icon, c) => { single[c] = icon; });
+  assert.deepStrictEqual(msFromBoard(single), [], 'two icons inside ONE unit is not a matching set');
+});
+
+test('matchingSetBonuses: two icons each spanning two units pay separately', () => {
+  const b = G.emptyBoard();
+  [1, 1, 1, 2, 2, 2, 3, 3, 4].forEach((icon, c) => { b[c] = icon; });
+  [1, 1, 1, 2, 2, 2, 4, 4, 3].forEach((icon, c) => { b[4 * 9 + c] = icon; });
+  const ms = msFromBoard(b).sort((a, z) => a.icon - z.icon);
+  assert.strictEqual(ms.length, 2);
+  assert.strictEqual(ms[0].points + ms[1].points, 100);
+});
+
+test('matchingSetBonuses: row+col cross of one icon counts both units', () => {
+  const cells = [];
+  for (let c = 0; c < 9; c++) cells.push([4, c]);
+  for (let r = 0; r < 9; r++) cells.push([r, 4]);
+  const b = boardWith(cells, 2);
+  const ms = msFromBoard(b);
+  assert.strictEqual(ms.length, 1);
+  assert.strictEqual(ms[0].unitCount, 2);
+  assert.strictEqual(ms[0].points, 50);
+  assert.strictEqual(ms[0].cells.length, 17, 'shared cell listed once');
+});
+
+/* ---- Rotation ---- */
+
+test('ROTATION_MAP: total, bijective, period 4', () => {
+  assert.strictEqual(G.ROTATION_MAP.length, 43);
+  for (const t of G.ROTATION_MAP) assert.ok(Number.isInteger(t) && t >= 0 && t < 43);
+  assert.strictEqual(new Set(G.ROTATION_MAP).size, 43, 'bijection');
+  for (let id = 0; id < 43; id++) {
+    let x = id;
+    for (let k = 0; k < 4; k++) x = G.ROTATION_MAP[x];
+    assert.strictEqual(x, id, 'rotating 4 times returns shape ' + id);
+  }
+});
+
+test('ROTATION_MAP: known mappings', () => {
+  assert.strictEqual(G.ROTATION_MAP[0], 0, 'single is a fixed point');
+  assert.strictEqual(G.ROTATION_MAP[1], 2, 'Line2 H rotates to V');
+  assert.strictEqual(G.ROTATION_MAP[13], 13, 'square is a fixed point');
+  assert.strictEqual(G.ROTATION_MAP[38], 38, 'plus5 is a fixed point');
+});
+
+test('rotateShapeCells matches geometry', () => {
+  assert.deepStrictEqual(G.rotateShapeCells([[0, 0], [0, 1]], 1), [[0, 0], [1, 0]]);
+  assert.deepStrictEqual(
+    G.rotateShapeCells([[0, 0], [1, 0], [1, 1]], 2).map(([r, c]) => r + ',' + c).sort(),
+    ['0,0', '0,1', '1,0'].sort()
+  );
+});
+
+/* ---- Item economy ---- */
+
+test('computeEarned: rotate every 200 points with carry', () => {
+  let r = G.computeEarned({ pts: 190, combos: 0 }, { gained: 30, comboN: 0, perfectCount: 0 });
+  assert.strictEqual(r.earned.rotate, 1);
+  assert.strictEqual(r.progress.pts, 20);
+  r = G.computeEarned({ pts: 0, combos: 0 }, { gained: 401, comboN: 0, perfectCount: 0 });
+  assert.strictEqual(r.earned.rotate, 2);
+  assert.strictEqual(r.progress.pts, 1);
+});
+
+test('computeEarned: undo every 2nd multi-set combo', () => {
+  let r = G.computeEarned({ pts: 0, combos: 0 }, { gained: 0, comboN: 2, perfectCount: 0 });
+  assert.strictEqual(r.earned.undo, 0);
+  assert.strictEqual(r.progress.combos, 1);
+  r = G.computeEarned(r.progress, { gained: 0, comboN: 2, perfectCount: 0 });
+  assert.strictEqual(r.earned.undo, 1);
+  assert.strictEqual(r.progress.combos, 0);
+  r = G.computeEarned({ pts: 0, combos: 0 }, { gained: 0, comboN: 1, perfectCount: 0 });
+  assert.strictEqual(r.progress.combos, 0, 'single clear is not a combo');
+});
+
+test('computeEarned: freeze per perfect and per x3 combo', () => {
+  let r = G.computeEarned({ pts: 0, combos: 0 }, { gained: 0, comboN: 0, perfectCount: 2 });
+  assert.strictEqual(r.earned.freeze, 2);
+  r = G.computeEarned({ pts: 0, combos: 0 }, { gained: 0, comboN: 3, perfectCount: 1 });
+  assert.strictEqual(r.earned.freeze, 2, 'perfect + x3 combo both pay');
+  assert.strictEqual(r.progress.combos, 1, 'x3 combo also counts toward undo');
+});
+
+test('grantItems clamps to caps and reports what was granted', () => {
+  const inv = { rotate: 2, undo: 3, freeze: 0 };
+  const granted = G.grantItems(inv, { rotate: 3, undo: 1, freeze: 1 });
+  assert.deepStrictEqual(granted, { rotate: 1, undo: 0, freeze: 1 });
+  assert.deepStrictEqual(inv, { rotate: 3, undo: 3, freeze: 1 });
+});
+
+/* ---- Undo snapshot ---- */
+
+test('takeSnapshot: deep copy survives mutation of the original', () => {
+  const state = {
+    board: G.emptyBoard(),
+    tray: [{ shapeId: 1, icon: 2, frozen: true }, null, { shapeId: 3, icon: 4 }],
+    score: 55,
+    inv: { rotate: 1, undo: 2, freeze: 0 },
+    progress: { pts: 120, combos: 1 },
+    frozen: new Uint8Array(81),
+    freezeHold: true,
+  };
+  state.board[7] = 3;
+  state.frozen[7] = 1;
+  const snap = G.takeSnapshot(state);
+  state.board[7] = -1;
+  state.frozen[7] = 0;
+  state.tray[0].icon = 0;
+  state.inv.rotate = 3;
+  state.progress.pts = 0;
+  assert.strictEqual(snap.board[7], 3);
+  assert.strictEqual(snap.frozen[7], 1);
+  assert.strictEqual(snap.tray[0].icon, 2);
+  assert.strictEqual(snap.tray[0].frozen, true);
+  assert.strictEqual(snap.inv.rotate, 1);
+  assert.strictEqual(snap.progress.pts, 120);
+  assert.strictEqual(snap.freezeHold, true);
 });
 
 /* ---- Simulated full turns: the resolve pipeline invariants ---- */

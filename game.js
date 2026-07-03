@@ -188,6 +188,96 @@ function iconBonuses(board, units) {
   return bonuses;
 }
 
+/* Matching Sets: an icon with a 3+ match in k >= 2 distinct cleared units.
+   Tier 50 (k=2), 100 (k=3), 200 (k>=4); doubled for the lizard. */
+function matchingSetsTier(k) {
+  if (k >= 4) return 200;
+  if (k === 3) return 100;
+  if (k === 2) return 50;
+  return 0;
+}
+
+function matchingSetBonuses(bonuses) {
+  const byIcon = new Map();
+  for (const b of bonuses) {
+    if (!byIcon.has(b.icon)) byIcon.set(b.icon, []);
+    byIcon.get(b.icon).push(b);
+  }
+  const out = [];
+  for (const [icon, list] of byIcon) {
+    const tier = matchingSetsTier(list.length);
+    if (tier === 0) continue;
+    const cells = new Set();
+    for (const b of list) for (const idx of b.cells) cells.add(idx);
+    out.push({
+      icon,
+      unitCount: list.length,
+      points: icon === LIZARD_ICON ? tier * 2 : tier,
+      cells: [...cells],
+    });
+  }
+  return out;
+}
+
+/* ---- Items ---- */
+
+const ITEM_CAPS = { rotate: 3, undo: 3, freeze: 3 };
+
+/* Economy: rotate 1 per 200 cumulative points, undo 1 per 2 multi-set combos,
+   freeze 1 per Perfect Match and 1 per x3+ combo. Progress is per game. */
+function computeEarned(progress, turn) {
+  const p = { pts: progress.pts + turn.gained, combos: progress.combos };
+  const earned = { rotate: 0, undo: 0, freeze: 0 };
+  while (p.pts >= 200) { p.pts -= 200; earned.rotate++; }
+  if (turn.comboN >= 2) p.combos += 1;
+  while (p.combos >= 2) { p.combos -= 2; earned.undo++; }
+  earned.freeze += turn.perfectCount || 0;
+  if (turn.comboN >= 3) earned.freeze++;
+  return { earned, progress: p };
+}
+
+function grantItems(inv, earned) {
+  const granted = { rotate: 0, undo: 0, freeze: 0 };
+  for (const k of Object.keys(granted)) {
+    const room = Math.max(0, ITEM_CAPS[k] - inv[k]);
+    granted[k] = Math.min(room, earned[k]);
+    inv[k] += granted[k];
+  }
+  return granted;
+}
+
+/* Rotation: 90 degrees clockwise, (r,c) -> (c, h-1-r), re-anchored to (0,0).
+   The 43-shape set is closed under rotation; ROTATION_MAP proves it at load. */
+function rotateShapeCells(cells, h) {
+  const rot = cells.map(([r, c]) => [c, h - 1 - r]);
+  let minR = Infinity, minC = Infinity;
+  for (const [r, c] of rot) { minR = Math.min(minR, r); minC = Math.min(minC, c); }
+  return rot.map(([r, c]) => [r - minR, c - minC]);
+}
+
+const shapeKeyOf = (cells) => cells.map(([r, c]) => r + ',' + c).sort().join('|');
+const ROTATION_MAP = (() => {
+  const byKey = new Map(SHAPES.map((s, id) => [shapeKeyOf(s.cells), id]));
+  return SHAPES.map((s, id) => {
+    const target = byKey.get(shapeKeyOf(rotateShapeCells(s.cells, s.h)));
+    if (target === undefined) throw new Error('shape ' + id + ' has no rotation in the set');
+    return target;
+  });
+})();
+
+/* One-level undo: deep snapshot of everything a turn can change. */
+function takeSnapshot(state) {
+  return {
+    board: new Int8Array(state.board),
+    tray: state.tray.map((p) => (p ? { ...p } : null)),
+    score: state.score,
+    inv: { ...state.inv },
+    progress: { ...state.progress },
+    frozen: new Uint8Array(state.frozen),
+    freezeHold: !!state.freezeHold,
+  };
+}
+
 /* ---- Piece generation ---- */
 
 function pickShapeId(rng) {
@@ -245,27 +335,66 @@ function isGameOver(board, tray) {
   return remaining.length > 0 && remaining.every((p) => !fitsSomewhere(board, SHAPES[p.shapeId]));
 }
 
-/* ---- Persistence (schema v1) ---- */
+/* ---- Persistence (schema v2; v1 saves migrate) ---- */
 
-function encodeSave(best, board, tray, score) {
+function defaultMeta() {
   return {
-    v: 1,
-    best,
-    game: {
-      board: Array.from(board),
-      tray: tray.map((p) => (p ? { shapeId: p.shapeId, icon: p.icon } : null)),
-      score,
-    },
+    best: 0,
+    muted: false,
+    volume: 50,
+    theme: 'auto',
+    nickname: '',
+    seenTutorial: false,
+    tutorialOffered: false,
+    itemHelp: { rotate: false, undo: false, freeze: false },
   };
 }
 
-/* Returns { best, game|null }. On any surprise, discard game but keep best. */
+function frozenMaskToList(mask) {
+  const list = [];
+  for (let i = 0; i < CELL_COUNT; i++) if (mask[i]) list.push(i);
+  return list;
+}
+
+function encodeGame(state) {
+  return {
+    board: Array.from(state.board),
+    tray: state.tray.map((p) => (p
+      ? { shapeId: p.shapeId, icon: p.icon, ...(p.frozen ? { frozen: true } : {}) }
+      : null)),
+    score: state.score,
+    inv: { ...state.inv },
+    progress: { ...state.progress },
+    frozen: frozenMaskToList(state.frozen),
+    freezeHold: !!state.freezeHold,
+  };
+}
+
+const clampInt = (v, lo, hi, fallback) =>
+  (Number.isInteger(v) && v >= lo && v <= hi) ? v : fallback;
+
+/* Returns full meta + game|null. On any surprise inside game, discard the
+   game but keep the meta. v1 payloads (no v2 fields) migrate to defaults. */
 function validateSave(raw) {
-  const out = { best: 0, game: null };
+  const out = { ...defaultMeta(), game: null };
   if (!raw || typeof raw !== 'object') return out;
+
   if (typeof raw.best === 'number' && isFinite(raw.best) && raw.best >= 0) {
     out.best = Math.floor(raw.best);
   }
+  out.muted = raw.muted === true;
+  out.volume = clampInt(raw.volume, 0, 100, 50);
+  out.theme = ['auto', 'light', 'dark'].includes(raw.theme) ? raw.theme : 'auto';
+  out.nickname = typeof raw.nickname === 'string'
+    ? raw.nickname.replace(/[<>\u0000-\u001F\u007F-\u009F\u200B-\u200F\uFEFF]/g, '').replace(/\s+/g, ' ').trim().slice(0, 16)
+    : '';
+  out.seenTutorial = raw.seenTutorial === true;
+  out.tutorialOffered = raw.tutorialOffered === true;
+  const ih = raw.itemHelp;
+  if (ih && typeof ih === 'object') {
+    out.itemHelp = { rotate: ih.rotate === true, undo: ih.undo === true, freeze: ih.freeze === true };
+  }
+
   const g = raw.game;
   try {
     if (!g || typeof g !== 'object') return out;
@@ -282,10 +411,41 @@ function validateSave(raw) {
       if (!p || typeof p !== 'object') throw new Error('bad piece');
       if (!Number.isInteger(p.shapeId) || p.shapeId < 0 || p.shapeId >= SHAPES.length) throw new Error('bad shape');
       if (!Number.isInteger(p.icon) || p.icon < 0 || p.icon >= ICONS.length) throw new Error('bad icon');
-      return { shapeId: p.shapeId, icon: p.icon };
+      const piece = { shapeId: p.shapeId, icon: p.icon };
+      if (p.frozen === true) piece.frozen = true;
+      else if (p.frozen !== undefined && p.frozen !== false) throw new Error('bad frozen flag');
+      return piece;
     });
     if (typeof g.score !== 'number' || !isFinite(g.score) || g.score < 0) return out;
-    out.game = { board, tray, score: Math.floor(g.score) };
+
+    /* v2 fields; absent (v1 game) means defaults */
+    const inv = { rotate: 0, undo: 0, freeze: 0 };
+    if (g.inv !== undefined) {
+      if (!g.inv || typeof g.inv !== 'object') return out;
+      for (const k of Object.keys(inv)) {
+        if (g.inv[k] !== undefined && !Number.isInteger(g.inv[k])) return out;
+        inv[k] = Math.max(0, Math.min(ITEM_CAPS[k], g.inv[k] || 0));
+      }
+    }
+    const progress = { pts: 0, combos: 0 };
+    if (g.progress !== undefined) {
+      if (!g.progress || typeof g.progress !== 'object') return out;
+      progress.pts = clampInt(g.progress.pts, 0, 199, 0);
+      progress.combos = clampInt(g.progress.combos, 0, 1, 0);
+    }
+    const frozen = new Uint8Array(CELL_COUNT);
+    if (g.frozen !== undefined) {
+      if (!Array.isArray(g.frozen)) return out;
+      for (const idx of g.frozen) {
+        if (!Number.isInteger(idx) || idx < 0 || idx >= CELL_COUNT) return out;
+        if (board[idx] === -1) return out; /* frozen cell must be filled */
+        frozen[idx] = 1;
+      }
+    }
+    const freezeHold = g.freezeHold === true;
+    if (freezeHold && frozenMaskToList(frozen).length === 0) return out;
+
+    out.game = { board, tray, score: Math.floor(g.score), inv, progress, frozen, freezeHold };
     return out;
   } catch (e) {
     return out;
@@ -299,8 +459,11 @@ if (typeof module !== 'undefined' && module.exports) {
     N, CELL_COUNT,
     emptyBoard, canPlace, fitsSomewhere, placePiece,
     scanUnits, unionCells, clearScore, iconBonusTier, iconBonuses,
+    matchingSetsTier, matchingSetBonuses,
+    ITEM_CAPS, computeEarned, grantItems,
+    rotateShapeCells, ROTATION_MAP, takeSnapshot,
     pickShapeId, pickIcon, makePiece, genTray, isGameOver,
-    encodeSave, validateSave,
+    defaultMeta, frozenMaskToList, encodeGame, validateSave,
   };
 }
 
@@ -343,7 +506,13 @@ function initUI() {
   let tray = [null, null, null];
   let score = 0;
   let best = 0;
-  let state = 'SPLASH';           /* SPLASH | IDLE | DRAGGING | RESOLVING | GAME_OVER */
+  let inv = { rotate: 0, undo: 0, freeze: 0 };
+  let progress = { pts: 0, combos: 0 };
+  let frozen = new Uint8Array(CELL_COUNT);
+  let freezeHold = false;
+  let meta = defaultMeta();       /* volume, theme, nickname, tutorial + item-help flags */
+  let hadSave = false;
+  let state = 'SPLASH';           /* SPLASH | IDLE | DRAGGING | RESOLVING | GAME_OVER | TUTORIAL */
   const rng = Math.random;
 
   let cellPx = 40;
@@ -783,6 +952,7 @@ function initUI() {
     const units = scanUnits(board);
     const n = units.length;
     const bonuses = n ? iconBonuses(board, units) : [];
+    const msBonuses = n ? matchingSetBonuses(bonuses) : [];
     const union = unionCells(units);
 
     /* Capture visuals before mutating further */
@@ -793,11 +963,19 @@ function initUI() {
 
     /* 3. Clear the union and apply all scoring */
     for (const idx of union) board[idx] = -1;
-    const gained = shape.cells.length + clearScore(n) + bonuses.reduce((a, b) => a + b.points, 0);
+    const gained = shape.cells.length + clearScore(n)
+      + bonuses.reduce((a, b) => a + b.points, 0)
+      + msBonuses.reduce((a, b) => a + b.points, 0);
     score += gained;
     /* Bank the record immediately so a mid-game restart can never lose it. */
     const newBest = score > best;
     if (newBest) best = score;
+
+    /* Item earning (economy in computeEarned; grants clamp at ITEM_CAPS) */
+    const perfectCount = bonuses.filter((b) => b.perfect).length;
+    const earnResult = computeEarned(progress, { gained, comboN: n, perfectCount });
+    progress = earnResult.progress;
+    const granted = grantItems(inv, earnResult.earned);
 
     /* 4. Refill when all three slots are used */
     const refilled = tray.every((p) => p === null);
@@ -819,8 +997,9 @@ function initUI() {
     }
     updateScoreDisplay();
 
+    void granted; /* consumed by the items bar UI in a later milestone */
     if (n > 0) {
-      showCallouts(n, bonuses);
+      showCallouts(n, bonuses, msBonuses);
       if (bonuses.length) {
         sound.bonus(bonuses.some((b) => b.icon === LIZARD_ICON));
         if (!reducedMotion) {
@@ -900,7 +1079,7 @@ function initUI() {
     }
   }
 
-  function showCallouts(n, bonuses) {
+  function showCallouts(n, bonuses, msBonuses) {
     fxCenter.textContent = '';
     let delay = 0;
     if (n >= 2) {
@@ -917,6 +1096,11 @@ function initUI() {
       addCallout('badge', ICONS[b.icon] + ' ' + label + ' +' + b.points, delay);
       delay += BADGE_STAGGER;
       if (b.icon === LIZARD_ICON) lizardHit = true;
+    }
+    for (const ms of (msBonuses || [])) {
+      addCallout('badge', ICONS[ms.icon] + ' Matching Sets x' + ms.unitCount + '! +' + ms.points, delay);
+      delay += BADGE_STAGGER;
+      if (ms.icon === LIZARD_ICON) lizardHit = true;
     }
     if (lizardHit && !reducedMotion) {
       glowEl.hidden = false;
@@ -970,9 +1154,7 @@ function initUI() {
   }
 
   function resetGame() {
-    board = emptyBoard();
-    score = 0;
-    tray = genTray(board, rng);
+    freshGameState();
     renderBoard();
     renderTray();
     updateScoreDisplay(true);
@@ -1015,27 +1197,45 @@ function initUI() {
   /* ---- Persistence ---- */
   function persist() {
     try {
-      const game = state === 'GAME_OVER' || isGameOver(board, tray) ? null
-        : encodeSave(best, board, tray, score).game;
-      localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, best, muted: sound.isMuted(), game }));
+      if (state === 'TUTORIAL') return; /* tutorial state never touches the save */
+      meta.best = best;
+      meta.muted = sound.isMuted();
+      const over = state === 'GAME_OVER' || isGameOver(board, tray);
+      const game = over ? null : encodeGame({ board, tray, score, inv, progress, frozen, freezeHold });
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 2, ...meta, game }));
     } catch (err) { /* storage may be unavailable; play on */ }
+  }
+
+  function freshGameState() {
+    board = emptyBoard();
+    score = 0;
+    inv = { rotate: 0, undo: 0, freeze: 0 };
+    progress = { pts: 0, combos: 0 };
+    frozen = new Uint8Array(CELL_COUNT);
+    freezeHold = false;
+    tray = genTray(board, rng);
   }
 
   function restore() {
     let raw = null;
     try { raw = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (err) { raw = null; }
+    hadSave = raw !== null;
     const save = validateSave(raw);
+    const { game, ...savedMeta } = save;
+    meta = savedMeta;
     best = save.best;
-    sound.setMuted(!!(raw && raw.muted === true));
-    if (save.game && !isGameOver(save.game.board, save.game.tray)) {
-      board = save.game.board;
-      tray = save.game.tray;
-      score = save.game.score;
+    sound.setMuted(save.muted);
+    if (game && !isGameOver(game.board, game.tray)) {
+      board = game.board;
+      tray = game.tray;
+      score = game.score;
+      inv = game.inv;
+      progress = game.progress;
+      frozen = game.frozen;
+      freezeHold = game.freezeHold;
       if (tray.every((p) => p === null)) tray = genTray(board, rng);
     } else {
-      board = emptyBoard();
-      score = 0;
-      tray = genTray(board, rng);
+      freshGameState();
     }
   }
 
