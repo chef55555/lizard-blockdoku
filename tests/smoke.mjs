@@ -269,12 +269,21 @@ check('piece turned from wide to tall', beforeRot.width > beforeRot.height && af
   JSON.stringify({ beforeRot, afterRot }));
 check('rotate did not place anything', (await filledCount()) === 0);
 check('one rotate consumed', (await page.locator('#itemRotate .cnt').textContent()) === '1');
+check('bar icon spins while a piece has free spins', (await page.locator('#itemRotate.spinning').count()) === 1);
+check('rotated piece gets the free rotate style', (await page.locator('.slot').nth(0).locator('.rot-btn.free').count()) === 1);
 const savedShape = await page.evaluate(() => JSON.parse(localStorage.getItem('lizard-blockdoku-v1')).game.tray[0].shapeId);
 check('rotation persisted to the save', savedShape === 2, 'shapeId=' + savedShape);
 await page.locator('.slot').nth(0).locator('.rot-btn').tap();
 await page.waitForTimeout(300);
-check('items bar disables at 0 rotates', (await page.locator('#itemRotate[disabled]').count()) === 1);
-check('slot rotate buttons vanish at 0', (await page.locator('.slot .rot-btn').count()) === 0);
+check('re-rotating the same piece is free', (await page.locator('#itemRotate .cnt').textContent()) === '1');
+const savedAgain = await page.evaluate(() => JSON.parse(localStorage.getItem('lizard-blockdoku-v1')).game.tray[0]);
+check('free spin persisted with the piece', savedAgain.shapeId === 1 && savedAgain.rotFree === true,
+  JSON.stringify(savedAgain));
+await page.locator('.slot').nth(1).locator('.rot-btn').tap();
+await page.waitForTimeout(300);
+check('rotating a second piece costs the second item', (await page.locator('#itemRotate[disabled]').count()) === 1);
+check('free pieces keep their buttons at 0 stock', (await page.locator('.slot .rot-btn').count()) === 2
+  && (await page.locator('.slot .rot-btn.free').count()) === 2);
 
 console.log('7e. Items: first-earn help card');
 // progress.pts 199: placing the single (+1 point) crosses 200 = 1 rotate.

@@ -593,24 +593,36 @@ header { text-align: center; height: 56px; flex: none; }
   margin-bottom: 6px;
 }
 
-/* Per-slot rotate button (visible while rotates are held) */
+/* Per-slot rotate button (visible while rotates are held or the piece
+   still has free spins) */
 .rot-btn {
   position: absolute;
   top: 2px;
   right: 2px;
-  width: 26px;
-  height: 26px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   border: 1px solid var(--pill-border);
   background: var(--pill-bg);
   color: var(--text);
-  font-size: 15px;
+  font-size: 19px;
   line-height: 1;
   cursor: pointer;
   z-index: 2;
   touch-action: none;
 }
 .rot-btn:active { transform: scale(0.9); }
+.rot-btn.free {
+  background: var(--btn-grad);
+  border-color: transparent;
+  color: #fff;
+}
+
+.item-btn .ic { display: inline-block; }
+#itemRotate.spinning .ic { animation: spin-slow 1.4s linear infinite; }
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
+}
 
 .item-btn.armed {
   border-color: #7FC8F5;
@@ -1044,6 +1056,7 @@ header { text-align: center; height: 56px; flex: none; }
   #floaters span, .splash-mascot, .splash-tap, #title .mascot { animation: none; }
   .cell.pop { animation: none; }
   .piece.spin, .item-btn.bounce { animation: none; }
+  #itemRotate.spinning .ic { animation: none; }
   .toast { animation: none; }
   .toast.out, .toast.out-fast { animation: reduced-toast-out 200ms ease-out forwards; }
   .cell.clearing { animation: reduced-clear 150ms ease-out forwards; }

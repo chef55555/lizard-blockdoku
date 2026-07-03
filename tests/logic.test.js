@@ -304,7 +304,7 @@ test('save v2 round-trip preserves everything', () => {
   G.placePiece(b, G.SHAPES[13], 3, 3, 2);
   const frozen = new Uint8Array(81);
   frozen[3 * 9 + 3] = 1;
-  const tray = [{ ...G.makePiece(rng), frozen: true }, null, G.makePiece(rng)];
+  const tray = [{ ...G.makePiece(rng), frozen: true }, null, { ...G.makePiece(rng), rotFree: true }];
   const game = G.encodeGame({
     board: b, tray, score: 123,
     inv: { rotate: 2, undo: 1, freeze: 3 },
@@ -402,6 +402,12 @@ test('validateSave: hostile v2 fields', () => {
 
   const evilName = G.validateSave({ v: 2, best: 1, nickname: '  <b>Liz</b>​  zard  ', game: null });
   assert.strictEqual(evilName.nickname, 'bLiz/b zard');
+
+  const badRotFree = G.validateSave({
+    ...base,
+    game: { ...base.game, tray: [{ shapeId: 0, icon: 1, rotFree: 'yes' }, null, null] },
+  });
+  assert.strictEqual(badRotFree.game, null, 'non-boolean rotFree rejected');
 });
 
 test('sanitizeNickname: strips markup, collapses whitespace, caps length', () => {

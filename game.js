@@ -368,7 +368,12 @@ function encodeGame(state) {
   return {
     board: Array.from(state.board),
     tray: state.tray.map((p) => (p
-      ? { shapeId: p.shapeId, icon: p.icon, ...(p.frozen ? { frozen: true } : {}) }
+      ? {
+        shapeId: p.shapeId,
+        icon: p.icon,
+        ...(p.frozen ? { frozen: true } : {}),
+        ...(p.rotFree ? { rotFree: true } : {}),
+      }
       : null)),
     score: state.score,
     inv: { ...state.inv },
@@ -432,6 +437,8 @@ function validateSave(raw) {
       const piece = { shapeId: p.shapeId, icon: p.icon };
       if (p.frozen === true) piece.frozen = true;
       else if (p.frozen !== undefined && p.frozen !== false) throw new Error('bad frozen flag');
+      if (p.rotFree === true) piece.rotFree = true;
+      else if (p.rotFree !== undefined && p.rotFree !== false) throw new Error('bad rotFree flag');
       return piece;
     });
     if (typeof g.score !== 'number' || !isFinite(g.score) || g.score < 0) return out;
@@ -758,30 +765,35 @@ function initUI() {
       const piece = tray[i];
       if (!piece) return;
       slot.appendChild(buildPieceEl(piece, '--tray-cell'));
-      if (inv.rotate > 0) slot.appendChild(buildRotBtn(i));
+      if (inv.rotate > 0 || piece.rotFree) slot.appendChild(buildRotBtn(i, piece.rotFree));
       if (!fitsSomewhere(board, SHAPES[piece.shapeId])) slot.classList.add('dead');
     });
   }
 
   /* Per-slot rotate button. Its pointerdown never reaches the slot, so
      tapping it can never begin a drag. */
-  function buildRotBtn(i) {
+  function buildRotBtn(i, free) {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'rot-btn';
+    b.className = 'rot-btn' + (free ? ' free' : '');
     b.textContent = '⟳';
-    b.setAttribute('aria-label', 'Rotate this piece');
+    b.setAttribute('aria-label', free ? 'Rotate this piece (free)' : 'Rotate this piece');
     b.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); });
     b.addEventListener('pointerup', (e) => { e.stopPropagation(); rotateSlot(i); });
     return b;
   }
 
+  /* One Rotate buys unlimited spins of that piece until it is placed;
+     the flag rides on the piece, so it survives saves and undo. */
   function rotateSlot(i) {
     if (state !== 'IDLE') return;
     const piece = tray[i];
-    if (!piece || inv.rotate <= 0) return;
-    inv.rotate--;
-    tray[i] = { ...piece, shapeId: ROTATION_MAP[piece.shapeId] };
+    if (!piece) return;
+    if (!piece.rotFree) {
+      if (inv.rotate <= 0) return;
+      inv.rotate--;
+    }
+    tray[i] = { ...piece, shapeId: ROTATION_MAP[piece.shapeId], rotFree: true };
     sound.rotate();
     renderTray();
     updateItemsBar();
@@ -1403,7 +1415,7 @@ function initUI() {
   const ITEM_INFO = {
     rotate: {
       icon: '\u{1F504}', article: 'a', name: 'Rotate',
-      text: 'Tap the little ⟳ arrow on a tray piece to spin it. You earn one for every 200 points!',
+      text: 'Tap the little ⟳ arrow on a tray piece to spin it. One Rotate covers that piece until you place it, so spin away! You earn one for every 200 points.',
     },
     undo: {
       icon: '↩️', article: 'an', name: 'Undo',
@@ -1423,6 +1435,8 @@ function initUI() {
       cnt.hidden = inv[k] === 0;
       btn.disabled = inv[k] === 0;
     }
+    /* The bar icon spins while any piece still has free rotations */
+    itemBtns.rotate.classList.toggle('spinning', tray.some((p) => p && p.rotFree));
   }
 
   function announceEarned(granted) {
