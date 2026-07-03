@@ -16,11 +16,20 @@ const PLAYER_NAME = 'Lizard';
 const IS_BETA = typeof location !== 'undefined' && location.pathname.includes('-beta');
 const SAVE_KEY = IS_BETA ? 'lizard-blockdoku-beta' : 'lizard-blockdoku-v1';
 
-/* Global leaderboard endpoint (Lambda Function URL). Empty string disables
-   the feature entirely; the game stays fully playable offline either way.
-   window.__LB_URL__ is a test hook so the smoke suite can mock the API. */
-const LEADERBOARD_URL = (typeof window !== 'undefined' && window.__LB_URL__) || 'https://5hejgq4fhsbt7wcyq7p4pa55wi0iurts.lambda-url.us-east-1.on.aws';
+/* Global leaderboard endpoint (Lambda Function URL). Only enabled when the
+   game is served from github.io: the API's CORS is pinned to that origin,
+   so calls from anywhere else (localhost dev, the test suite) could never
+   succeed and would only spam console errors. The game stays fully playable
+   offline either way. window.__LB_URL__ is the smoke suite's mock hook. */
+const LEADERBOARD_URL = (typeof window !== 'undefined' && window.__LB_URL__)
+  || (typeof location !== 'undefined' && location.hostname.endsWith('github.io')
+    ? 'https://5hejgq4fhsbt7wcyq7p4pa55wi0iurts.lambda-url.us-east-1.on.aws'
+    : '');
 const LB_KEY = 'lizard-blockdoku-lb';
+
+/* TEMPORARY: lets the beta submit real scores so Thomas can test the board
+   end to end. Flip to false before promoting v2 to production. */
+const BETA_LB_SUBMITS = true;
 
 const ICONS = ['\u{1F98E}', '\u{1F338}', '\u{1F49C}', '⭐', '\u{1F353}']; /* lizard flower heart star berry */
 const ICON_WEIGHTS = [8, 23, 23, 23, 23];
@@ -1928,7 +1937,8 @@ function initUI() {
 
   /* ---- Global leaderboard. Every call is best effort with a 5s timeout
      and never awaited by gameplay; offline play is completely unaffected.
-     Beta deployments may view the board but never submit to it. ---- */
+     Beta deployments may view the board but never submit to it (except
+     while the TEMPORARY BETA_LB_SUBMITS test switch is on). ---- */
   const lb = (() => {
     function identity() {
       try {
@@ -1963,7 +1973,7 @@ function initUI() {
     /* bestSubmitted only advances when the server answers, so any failure
        retries at the next game over, panel open, or reconnect. */
     async function submitBest() {
-      if (!LEADERBOARD_URL || IS_BETA) return;
+      if (!LEADERBOARD_URL || (IS_BETA && !BETA_LB_SUBMITS)) return;
       const idn = identity();
       if (best <= (idn.bestSubmitted || 0)) return;
       try {

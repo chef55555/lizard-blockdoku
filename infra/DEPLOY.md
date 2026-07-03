@@ -6,8 +6,8 @@ from any computer. The code is already in this repo:
 - `backend/index.mjs`: the Lambda handler (GET /top, POST /submit)
 - `infra/template.yml`: CloudFormation for the table, role, function, and Function URL
 - `infra/budget.json` + `infra/budget-notifications.json`: $1/month billing tripwire
-- `game.js`: `LEADERBOARD_URL` near the top is an empty string, which keeps the
-  whole feature disabled until you paste the Function URL in (step 7)
+- `game.js`: `LEADERBOARD_URL` near the top holds the live Function URL,
+  origin-gated to github.io (deployed 2026-07-03; see step 7 for the pattern)
 
 Region for everything: **us-east-1**. Total cost at friends-and-family
 traffic: $0/month (Lambda + Function URL free tier is permanent; the
@@ -108,8 +108,10 @@ budgets on an account are free. Alerts email thomas.sheffer@gmail.com at
 
 ## 7. Wire the game to it
 
-1. In `game.js`, set the Function URL (keep the test hook):
-   `const LEADERBOARD_URL = (typeof window !== 'undefined' && window.__LB_URL__) || 'https://xxxxxxxx.lambda-url.us-east-1.on.aws';`
+1. In `game.js`, set the Function URL (keep the test hook AND the github.io
+   origin gate: the API's CORS only allows that origin, so enabling it on
+   localhost just spams console errors and breaks the smoke suite):
+   `const LEADERBOARD_URL = (typeof window !== 'undefined' && window.__LB_URL__) || (typeof location !== 'undefined' && location.hostname.endsWith('github.io') ? 'https://xxxxxxxx.lambda-url.us-east-1.on.aws' : '');`
    (no trailing slash)
 2. Bump `CACHE` in `sw.js` (mandatory on every deploy).
 3. Run `node tests/logic.test.js` and `node tests/smoke.mjs`
@@ -126,9 +128,9 @@ budgets on an account are free. Alerts email thomas.sheffer@gmail.com at
   though `AuthType` was `NONE` and the `lambda:InvokeFunctionUrl` grant for
   `Principal: '*'` was present. Fix: the resource policy ALSO needs a plain
   `lambda:InvokeFunction` grant for `Principal: '*'` (no `FunctionUrlAuthType`
-  condition — AWS rejects that flag on this action). Both statements are now in
+  condition: AWS rejects that flag on this action). Both statements are now in
   `template.yml` (`FnUrlPermission` + `FnInvokePermission`), so a fresh deploy
-  is fine. Direct `aws lambda invoke` worked the whole time — that isolates a
+  is fine. Direct `aws lambda invoke` worked the whole time; that isolates a
   403 like this to the URL auth layer, not your handler.
 - The AWS CLI installs to `C:\Program Files\Amazon\AWSCLIV2\aws.exe`. If `aws`
   isn't on PATH yet, call it by that full path.
