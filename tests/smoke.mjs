@@ -286,6 +286,49 @@ await page.waitForTimeout(100);
 check('help card dismisses', (await page.locator('#itemHelp:not([hidden])').count()) === 0);
 check('earned rotate shows in the bar', (await page.locator('#itemRotate .cnt').textContent()) === '1');
 
+console.log('7f. Items: undo a placement');
+{
+  const board = new Array(81).fill(-1);
+  await injectSave({
+    v: 2, best: 500,
+    game: {
+      board, tray: [{ shapeId: 13, icon: 2 }, { shapeId: 0, icon: 3 }, { shapeId: 1, icon: 4 }],
+      score: 50, inv: { rotate: 0, undo: 1, freeze: 0 }, progress: { pts: 0, combos: 0 },
+    },
+  });
+}
+await dragPiece(0, 2, 2); // 2x2 square
+await page.waitForTimeout(600);
+check('square placed before undo', (await filledCount()) === 4);
+check('score counted the square', (await score()) === 54);
+await page.tap('#itemUndo');
+await page.waitForTimeout(300);
+check('undo restores the board', (await filledCount()) === 0);
+check('undo rewinds the score', (await score()) === 50);
+check('undo returns the piece to its slot', (await page.locator('.slot').nth(0).locator('.piece').count()) === 1);
+check('undo consumed', (await page.locator('#itemUndo[disabled]').count()) === 1);
+
+console.log('7g. Undo from game over');
+{
+  const board = new Array(81).fill(1);
+  for (let r = 0; r < 9; r++) { board[r * 9 + r] = -1; board[r * 9 + ((r + 4) % 9)] = -1; }
+  await injectSave({
+    v: 2, best: 500,
+    game: {
+      board, tray: [{ shapeId: 0, icon: 4 }, { shapeId: 38, icon: 1 }, { shapeId: 38, icon: 2 }],
+      score: 100, inv: { rotate: 0, undo: 1, freeze: 0 }, progress: { pts: 0, combos: 0 },
+    },
+  });
+}
+await dragPiece(0, 0, 0);
+await page.waitForSelector('#gameOver.show', { timeout: 5000 });
+check('undo offered on the game-over card', (await page.locator('#undoGameOver:not([hidden])').count()) === 1);
+await page.tap('#undoGameOver');
+await page.waitForTimeout(300);
+check('undo dismisses game over', (await page.locator('#gameOver.show').count()) === 0);
+check('board rewound to before the fatal move', (await filledCount()) === 63);
+check('score rewound on game-over undo', (await score()) === 100);
+
 console.log('8. Landscape browser tab still fits');
 await page.setViewportSize({ width: 844, height: 390 });
 await page.reload();

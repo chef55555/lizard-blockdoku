@@ -524,6 +524,7 @@ function initUI() {
   let frozen = new Uint8Array(CELL_COUNT);
   let freezeHold = false;
   let meta = defaultMeta();       /* volume, theme, nickname, tutorial + item-help flags */
+  let undoSnapshot = null;        /* one level, in-memory only; gone after reload */
   let hadSave = false;
   let state = 'SPLASH';           /* SPLASH | IDLE | DRAGGING | RESOLVING | GAME_OVER | TUTORIAL */
   const rng = Math.random;
@@ -628,6 +629,7 @@ function initUI() {
       },
       tap: () => note(660, 0, 0.05, 'sine', 0.25),
       rotate: () => { note(500, 0, 0.06, 'triangle', 0.4, 900); note(700, 0.05, 0.08, 'triangle', 0.35, 1100); },
+      undo: () => { note(720, 0, 0.07, 'triangle', 0.4, 480); note(480, 0.06, 0.09, 'triangle', 0.35, 320); },
     };
   })();
 
@@ -1005,6 +1007,8 @@ function initUI() {
      consistent; the DOM catches up during the animation phase. ---- */
   async function resolveTurn(slotIdx, row, col) {
     state = 'RESOLVING';
+    /* Everything a turn can change, captured before any mutation */
+    undoSnapshot = takeSnapshot({ board, tray, score, inv, progress, frozen, freezeHold });
     const piece = tray[slotIdx];
     const shape = SHAPES[piece.shapeId];
 
@@ -1296,6 +1300,45 @@ function initUI() {
     if (inv.rotate > 0) showToast('item-toast', '⟳ Tap the little arrow on a tray piece to rotate it');
   });
 
+  /* ---- Undo: one level, usable from play or from the game-over card.
+     Restoring the snapshot also revokes items earned by the undone turn;
+     the undo itself is consumed from the RESTORED inventory. ---- */
+  function doUndo() {
+    if (!undoSnapshot || inv.undo <= 0) return;
+    if (state !== 'IDLE' && state !== 'GAME_OVER') return;
+    const snap = undoSnapshot;
+    undoSnapshot = null;
+    board = snap.board;
+    tray = snap.tray;
+    score = snap.score;
+    inv = snap.inv;
+    progress = snap.progress;
+    frozen = snap.frozen;
+    freezeHold = snap.freezeHold;
+    inv.undo = Math.max(0, inv.undo - 1);
+    if (state === 'GAME_OVER') {
+      gameOverEl.classList.remove('show');
+      gameOverEl.hidden = true;
+    }
+    state = 'IDLE';
+    sound.undo();
+    renderBoard();
+    renderTray();
+    updateItemsBar();
+    updateScoreDisplay(true);
+    persist();
+    showToast('item-toast', '↩️ Move undone');
+  }
+
+  itemBtns.undo.addEventListener('click', () => {
+    if (inv.undo > 0 && !undoSnapshot) {
+      showToast('item-toast', '↩️ Nothing to undo yet');
+      return;
+    }
+    doUndo();
+  });
+  $('undoGameOver').addEventListener('click', doUndo);
+
   /* ---- Overlays ---- */
   function showGameOver(newBest) {
     state = 'GAME_OVER';
@@ -1312,6 +1355,7 @@ function initUI() {
       headline.textContent = 'Game Over';
       headline.classList.remove('gold');
     }
+    $('undoGameOver').hidden = !(inv.undo > 0 && undoSnapshot);
     gameOverEl.hidden = false;
     void gameOverEl.offsetWidth; /* flush styles so the card entrance transition plays */
     gameOverEl.classList.add('show');
@@ -1333,6 +1377,7 @@ function initUI() {
 
   function resetGame() {
     freshGameState();
+    undoSnapshot = null;
     renderBoard();
     renderTray();
     updateItemsBar();
