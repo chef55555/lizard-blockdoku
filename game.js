@@ -2070,6 +2070,15 @@ function initUI() {
   $('lbBtn').addEventListener('click', () => { sound.tap(); openLeaderboard(); });
   $('lbGameOver').addEventListener('click', () => { sound.tap(); openLeaderboard(); });
   $('lbClose').addEventListener('click', () => { sound.tap(); lbPanelEl.hidden = true; });
+  /* Her crown pill is a door to the leaderboard too */
+  const bestPillEl = document.querySelector('.best-pill');
+  bestPillEl.setAttribute('role', 'button');
+  bestPillEl.setAttribute('aria-label', 'Show the leaderboard');
+  bestPillEl.addEventListener('click', () => {
+    if (!LEADERBOARD_URL || state !== 'IDLE' || tutorial) return;
+    sound.tap();
+    openLeaderboard();
+  });
   window.addEventListener('online', () => lb.submitBest());
 
   /* ---- Overlays ---- */

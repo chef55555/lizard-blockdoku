@@ -650,6 +650,13 @@ await page.addInitScript(() => { window.__LB_URL__ = 'https://lb.test'; });
     game: { board, tray: [{ shapeId: 0, icon: 4 }, { shapeId: 38, icon: 1 }, { shapeId: 38, icon: 2 }], score: 100 },
   });
 }
+// The crown pill opens the leaderboard whenever the feature is live
+await page.tap('.best-pill');
+await page.waitForTimeout(400);
+check('tapping the best pill opens the leaderboard', (await page.locator('#lbPanel:not([hidden])').count()) === 1);
+await page.tap('#lbClose');
+await page.waitForTimeout(100);
+
 await dragPiece(0, 0, 0);
 await page.waitForSelector('#gameOver.show', { timeout: 5000 });
 await page.waitForTimeout(600);

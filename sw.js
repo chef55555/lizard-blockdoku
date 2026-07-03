@@ -1,7 +1,7 @@
 'use strict';
 
 /* Bump CACHE on every deploy so updates reach installed phones. */
-const CACHE = 'lizard-blockdoku-v7';
+const CACHE = 'lizard-blockdoku-v8';
 const ASSETS = [
   './',
   './index.html',
