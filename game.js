@@ -27,9 +27,10 @@ const LEADERBOARD_URL = (typeof window !== 'undefined' && window.__LB_URL__)
     : '');
 const LB_KEY = 'lizard-blockdoku-lb';
 
-/* TEMPORARY: lets the beta submit real scores so Thomas can test the board
-   end to end. Flip to false before promoting v2 to production. */
-const BETA_LB_SUBMITS = true;
+/* Test switch: when true the beta may submit real scores. Kept off so beta
+   playtesting never pollutes the real board (flipped on once, 2026-07-03,
+   to verify the live pipeline end to end). */
+const BETA_LB_SUBMITS = false;
 
 const ICONS = ['\u{1F98E}', '\u{1F338}', '\u{1F49C}', '⭐', '\u{1F353}']; /* lizard flower heart star berry */
 const ICON_WEIGHTS = [8, 23, 23, 23, 23];
@@ -1937,8 +1938,8 @@ function initUI() {
 
   /* ---- Global leaderboard. Every call is best effort with a 5s timeout
      and never awaited by gameplay; offline play is completely unaffected.
-     Beta deployments may view the board but never submit to it (except
-     while the TEMPORARY BETA_LB_SUBMITS test switch is on). ---- */
+     Beta deployments may view the board but never submit to it
+     (BETA_LB_SUBMITS is the testing escape hatch). ---- */
   const lb = (() => {
     function identity() {
       try {
