@@ -38,11 +38,52 @@
   --pill-border: #E5C0EE;
   --btn-grad: linear-gradient(90deg, #D9368F, #8A4FBF);
   --overlay: rgba(74, 29, 94, 0.55);
+  --card-bg: #FFF6FB;
+  --card-border: #E5C0EE;
+  --toast-bg: rgba(255, 255, 255, 0.94);
+  --slot-bg: rgba(255, 255, 255, 0.35);
 
   --font-display: "Fredoka", ui-rounded, "Segoe UI", system-ui, sans-serif;
   --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --font-emoji: "Noto Color Emoji", "Segoe UI Emoji", "Apple Color Emoji", sans-serif;
 }
+
+/* Dark "Berry Lizard": stamped by JS as data-theme (auto resolves to
+   light/dark there, so the CSS never needs a media query for it). */
+:root[data-theme="dark"] {
+  --bg-gradient: linear-gradient(165deg, #2A1436 0%, #1F1030 55%, #170B26 100%);
+  --board-bg: #2B1B3A;
+  --board-frame: #9D5FC9;
+  --tint-pink: #3A2246;
+  --tint-lav: #322048;
+  --line-thin: #4A2C5A;
+  --line-heavy: #7E49A8;
+  --block-grad: linear-gradient(145deg, #E24A9E 0%, #B82478 100%);
+  --block-edge: #8E1B5E;
+  --ghost-fill: rgba(226, 74, 158, 0.28);
+  --ghost-dash: #E24A9E;
+  --text: #F2E3FA;
+  --text-soft: #C9A6DD;
+  --pill-bg: rgba(43, 27, 58, 0.65);
+  --pill-border: #5A3A6E;
+  --overlay: rgba(15, 7, 24, 0.62);
+  --card-bg: #2B1B3A;
+  --card-border: #5A3A6E;
+  --toast-bg: rgba(43, 27, 58, 0.94);
+  --slot-bg: rgba(43, 27, 58, 0.5);
+}
+:root[data-theme="dark"] .bg-blob { opacity: 0.14; }
+:root[data-theme="dark"] .blob3 { opacity: 0.08; }
+:root[data-theme="dark"] #board { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+:root[data-theme="dark"] #title { color: #C9A6DD; }
+@supports (-webkit-background-clip: text) {
+  :root[data-theme="dark"] #title {
+    background: linear-gradient(90deg, #F35FAE, #B388F5);
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+}
+:root[data-theme="dark"] .card h2.gold { color: var(--gold); }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -196,7 +237,7 @@ header { text-align: center; height: 56px; flex: none; }
 }
 .combo-pill.show { opacity: 1; transform: scale(1); }
 
-#restartBtn, #muteBtn {
+#restartBtn, #muteBtn, #settingsBtn {
   width: 36px;
   height: 36px;
   border-radius: 50%;
@@ -208,8 +249,8 @@ header { text-align: center; height: 56px; flex: none; }
   cursor: pointer;
   flex: none;
 }
-#muteBtn { font-family: var(--font-emoji); font-size: 15px; }
-#restartBtn:active, #muteBtn:active { transform: scale(0.92); }
+#muteBtn, #settingsBtn { font-family: var(--font-emoji); font-size: 15px; }
+#restartBtn:active, #muteBtn:active, #settingsBtn:active { transform: scale(0.92); }
 
 /* ---- Board ---- */
 
@@ -368,7 +409,7 @@ header { text-align: center; height: 56px; flex: none; }
 .toast {
   pointer-events: auto;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--toast-bg);
   color: var(--text);
   border: 1px solid var(--pill-border);
   border-radius: 14px;
@@ -443,7 +484,7 @@ header { text-align: center; height: 56px; flex: none; }
 
 .slot {
   flex: 1 1 0;
-  background: rgba(255, 255, 255, 0.35);
+  background: var(--slot-bg);
   border-radius: 14px;
   display: flex;
   align-items: center;
@@ -547,8 +588,8 @@ header { text-align: center; height: 56px; flex: none; }
 .overlay.gone { opacity: 0; transition: opacity 400ms ease; }
 
 .card, .splash-card {
-  background: #FFF6FB;
-  border: 2px solid #E5C0EE;
+  background: var(--card-bg);
+  border: 2px solid var(--card-border);
   border-radius: 22px;
   padding: 28px 32px;
   text-align: center;
@@ -650,6 +691,92 @@ header { text-align: center; height: 56px; flex: none; }
 @keyframes tap-hint {
   from { opacity: 0.5; }
   to   { opacity: 1; }
+}
+
+/* ---- Settings ---- */
+
+.settings-card { text-align: left; }
+.settings-card h2 { text-align: center; }
+
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 14px 0;
+}
+.set-row label, .set-row .set-label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+  flex: none;
+}
+
+#volSlider {
+  flex: 1;
+  min-width: 0;
+  accent-color: #D9368F;
+}
+
+.seg {
+  display: flex;
+  border: 1.5px solid var(--pill-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.seg button {
+  border: none;
+  background: transparent;
+  color: var(--text-soft);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--btn-grad); color: #fff; }
+
+#nickInput {
+  flex: 1;
+  min-width: 0;
+  border: 1.5px solid var(--pill-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--text);
+  background: var(--board-bg);
+  -webkit-user-select: text;
+  user-select: text;
+}
+#nickInput:focus { outline: 2px solid #D9368F; }
+
+#scoreHelpBtn { margin: 4px 0 12px; }
+
+/* ---- Scoring sheet ---- */
+
+.sheet {
+  max-height: min(78vh, 560px);
+  display: flex;
+  flex-direction: column;
+}
+.help-body {
+  overflow-y: auto;
+  text-align: left;
+  margin: 4px 0 16px;
+}
+.help-item {
+  margin: 10px 0;
+  font-size: 13px;
+  color: var(--text-soft);
+}
+.help-item b {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
 }
 
 /* ---- Reduced motion ---- */

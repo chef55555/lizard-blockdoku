@@ -28,6 +28,7 @@
       <div class="pill best-pill"><span class="crown">&#x1F451;</span> <span id="bestVal">0</span></div>
       <button id="muteBtn" type="button" aria-label="Mute sounds">&#x1F50A;</button>
       <button id="restartBtn" type="button" aria-label="Start over">&#x21BB;</button>
+      <button id="settingsBtn" type="button" aria-label="Settings">&#x2699;&#xFE0F;</button>
     </div>
 
     <div id="boardWrap">
@@ -78,6 +79,46 @@
       <p class="sweet-line">Your current game will be lost</p>
       <button id="confirmYes" type="button" class="btn-main">Start over</button>
       <button id="confirmNo" type="button" class="btn-ghost">Keep playing</button>
+    </div>
+  </div>
+
+  <div id="settings" class="overlay" hidden>
+    <div class="card settings-card">
+      <h2>Settings</h2>
+      <div class="set-row">
+        <label for="volSlider">Volume</label>
+        <input type="range" id="volSlider" min="0" max="100" step="5" value="50">
+      </div>
+      <div class="set-row">
+        <span class="set-label" id="themeLabel">Theme</span>
+        <div class="seg" id="themeSeg" role="group" aria-labelledby="themeLabel">
+          <button type="button" data-theme-choice="auto" aria-pressed="true">Auto</button>
+          <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+          <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+        </div>
+      </div>
+      <div class="set-row">
+        <label for="nickInput">Nickname</label>
+        <input type="text" id="nickInput" maxlength="16" placeholder="Lizard" autocomplete="off" spellcheck="false">
+      </div>
+      <button id="scoreHelpBtn" type="button" class="btn-ghost">How scoring works</button>
+      <button id="settingsDone" type="button" class="btn-main">Done</button>
+    </div>
+  </div>
+
+  <div id="scoreHelp" class="overlay" hidden>
+    <div class="card sheet">
+      <h2>How scoring works</h2>
+      <div class="help-body">
+        <div class="help-item"><b>Place a piece</b><span>+1 point per block</span></div>
+        <div class="help-item"><b>Clear a set</b><span>fill a whole row, column, or 3x3 box: +18</span></div>
+        <div class="help-item"><b>Combo</b><span>sets cleared together are worth much more: x2 is +54, x3 is +90, x4 is +126...</span></div>
+        <div class="help-item"><b>Icon match</b><span>3 or more matching icons inside a cleared set: 3-4 icons +10, 5-6 +25, 7-8 +50</span></div>
+        <div class="help-item"><b>Perfect match</b><span>all 9 icons in a set the same: +100</span></div>
+        <div class="help-item"><b>Matching sets</b><span>the same icon matched across 2, 3, or 4+ sets cleared together: +50 / +100 / +200</span></div>
+        <div class="help-item"><b>Lizard power</b><span>&#x1F98E; bonuses always count double</span></div>
+      </div>
+      <button id="scoreHelpClose" type="button" class="btn-main">Got it</button>
     </div>
   </div>
 

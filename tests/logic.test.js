@@ -404,6 +404,15 @@ test('validateSave: hostile v2 fields', () => {
   assert.strictEqual(evilName.nickname, 'bLiz/b zard');
 });
 
+test('sanitizeNickname: strips markup, collapses whitespace, caps length', () => {
+  assert.strictEqual(G.sanitizeNickname('  Liz<z>ard!  '), 'Lizzard!');
+  assert.strictEqual(G.sanitizeNickname('a'.repeat(40)), 'a'.repeat(16));
+  assert.strictEqual(G.sanitizeNickname('Liz   za  rd'), 'Liz za rd', 'runs of spaces collapse');
+  assert.strictEqual(G.sanitizeNickname('Liz\tza\n rd'), 'Lizza rd', 'control chars strip, not collapse');
+  assert.strictEqual(G.sanitizeNickname(12), '');
+  assert.strictEqual(G.sanitizeNickname('Lizard 🦎'), 'Lizard 🦎');
+});
+
 /* ---- Matching Sets bonus ---- */
 
 test('matchingSetsTier: 0/50/100/200 ladder', () => {

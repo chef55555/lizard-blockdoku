@@ -375,6 +375,18 @@ function encodeGame(state) {
 const clampInt = (v, lo, hi, fallback) =>
   (Number.isInteger(v) && v >= lo && v <= hi) ? v : fallback;
 
+/* Strip angle brackets, control, and zero-width characters; collapse
+   whitespace; cap at 16 code units. Shared by the save validator and the
+   settings nickname input so both always agree. */
+function sanitizeNickname(s) {
+  if (typeof s !== 'string') return '';
+  return s
+    .replace(/[<>\u0000-\u001F\u007F-\u009F\u200B-\u200F\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 16);
+}
+
 /* Returns full meta + game|null. On any surprise inside game, discard the
    game but keep the meta. v1 payloads (no v2 fields) migrate to defaults. */
 function validateSave(raw) {
@@ -387,9 +399,7 @@ function validateSave(raw) {
   out.muted = raw.muted === true;
   out.volume = clampInt(raw.volume, 0, 100, 50);
   out.theme = ['auto', 'light', 'dark'].includes(raw.theme) ? raw.theme : 'auto';
-  out.nickname = typeof raw.nickname === 'string'
-    ? raw.nickname.replace(/[<>\u0000-\u001F\u007F-\u009F\u200B-\u200F\uFEFF]/g, '').replace(/\s+/g, ' ').trim().slice(0, 16)
-    : '';
+  out.nickname = sanitizeNickname(raw.nickname);
   out.seenTutorial = raw.seenTutorial === true;
   out.tutorialOffered = raw.tutorialOffered === true;
   const ih = raw.itemHelp;
@@ -465,7 +475,7 @@ if (typeof module !== 'undefined' && module.exports) {
     ITEM_CAPS, computeEarned, grantItems,
     rotateShapeCells, ROTATION_MAP, takeSnapshot,
     pickShapeId, pickIcon, makePiece, genTray, isGameOver,
-    defaultMeta, frozenMaskToList, encodeGame, validateSave,
+    defaultMeta, frozenMaskToList, encodeGame, validateSave, sanitizeNickname,
   };
 }
 
@@ -551,6 +561,9 @@ function initUI() {
     let ctx = null;
     let master = null;
     let muted = false;
+    let volume = 50;   /* 0..100; 50 = the original fixed gain of 0.22 */
+
+    const masterGain = () => 0.44 * (volume / 100);
 
     function ensure() {
       const AC = window.AudioContext || window.webkitAudioContext;
@@ -559,7 +572,7 @@ function initUI() {
         try {
           ctx = new AC();
           master = ctx.createGain();
-          master.gain.value = 0.22;
+          master.gain.value = masterGain();
           master.connect(ctx.destination);
         } catch (err) { ctx = null; return null; }
       }
@@ -591,6 +604,10 @@ function initUI() {
       isMuted: () => muted,
       setMuted: (m) => { muted = m; },
       toggle: () => { muted = !muted; },
+      setVolume: (v) => {
+        volume = Math.max(0, Math.min(100, v));
+        if (master) master.gain.value = masterGain();
+      },
       pickup: () => note(520, 0, 0.09, 'triangle', 0.5, 760),
       place: () => { note(300, 0, 0.1, 'triangle', 0.6, 190); note(900, 0, 0.035, 'sine', 0.2); },
       invalid: () => { note(220, 0, 0.09, 'square', 0.16, 180); note(170, 0.09, 0.13, 'square', 0.16, 140); },
@@ -1170,8 +1187,10 @@ function initUI() {
     showToast('score-toast', box, { ttl: 2400, onTap: openScoreHelp });
   }
 
-  /* Placeholder until the settings milestone ships the real sheet. */
-  let openScoreHelp = () => {};
+  /* ---- Scoring sheet (also opened by tapping any score toast) ---- */
+  const scoreHelpEl = $('scoreHelp');
+  function openScoreHelp() { scoreHelpEl.hidden = false; }
+  $('scoreHelpClose').addEventListener('click', () => { sound.tap(); scoreHelpEl.hidden = true; });
 
   /* ---- Overlays ---- */
   function showGameOver(newBest) {
@@ -1238,6 +1257,72 @@ function initUI() {
     sound.toggle();
     updateMuteBtn();
     sound.tap();
+    persist();
+  });
+
+  /* ---- Settings ---- */
+  const settingsEl = $('settings');
+  const volSlider = $('volSlider');
+  const nickInput = $('nickInput');
+  const themeButtons = Array.from(document.querySelectorAll('#themeSeg button'));
+  const themeMedia = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+  /* 'auto' follows the system; the resolved value is always stamped on the
+     root so the CSS only ever has to know about data-theme="dark". */
+  function applyTheme() {
+    const dark = meta.theme === 'dark' || (meta.theme === 'auto' && !!(themeMedia && themeMedia.matches));
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    const mc = document.querySelector('meta[name="theme-color"]');
+    if (mc) mc.setAttribute('content', dark ? '#2A1436' : '#8A4FBF');
+  }
+  if (themeMedia) {
+    const followSystem = () => { if (meta.theme === 'auto') applyTheme(); };
+    if (themeMedia.addEventListener) themeMedia.addEventListener('change', followSystem);
+    else if (themeMedia.addListener) themeMedia.addListener(followSystem);
+  }
+
+  function syncSettingsUI() {
+    volSlider.value = String(meta.volume);
+    nickInput.value = meta.nickname;
+    for (const b of themeButtons) {
+      b.setAttribute('aria-pressed', String(b.dataset.themeChoice === meta.theme));
+    }
+  }
+
+  $('settingsBtn').addEventListener('click', () => {
+    if (state !== 'IDLE') return;
+    sound.tap();
+    syncSettingsUI();
+    settingsEl.hidden = false;
+  });
+  $('settingsDone').addEventListener('click', () => {
+    sound.tap();
+    settingsEl.hidden = true;
+    persist();
+  });
+  $('scoreHelpBtn').addEventListener('click', () => { sound.tap(); openScoreHelp(); });
+
+  let volPreviewAt = 0;
+  volSlider.addEventListener('input', () => {
+    meta.volume = Math.max(0, Math.min(100, Number(volSlider.value) || 0));
+    sound.setVolume(meta.volume);
+    if (sound.isMuted()) { sound.setMuted(false); updateMuteBtn(); }
+    const now = performance.now();
+    if (now - volPreviewAt > 160) { volPreviewAt = now; sound.tap(); }
+  });
+  volSlider.addEventListener('change', () => persist());
+
+  themeButtons.forEach((b) => b.addEventListener('click', () => {
+    sound.tap();
+    meta.theme = b.dataset.themeChoice;
+    applyTheme();
+    syncSettingsUI();
+    persist();
+  }));
+
+  nickInput.addEventListener('change', () => {
+    meta.nickname = sanitizeNickname(nickInput.value);
+    nickInput.value = meta.nickname;
     persist();
   });
 
@@ -1333,6 +1418,8 @@ function initUI() {
   }
 
   restore();
+  sound.setVolume(meta.volume);
+  applyTheme();
   relayout();
   renderBoard();
   renderTray();
