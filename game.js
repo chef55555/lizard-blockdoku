@@ -20,7 +20,7 @@ const SAVE_KEY = IS_BETA ? 'lizard-blockdoku-beta' : 'lizard-blockdoku-v1';
    APP_BUILD must be bumped together with the sw.js CACHE version on every
    deploy: they are numerically aligned (build 13 = cache v13). */
 const APP_VERSION = 'v2.3';
-const APP_BUILD = 15;
+const APP_BUILD = 16;
 
 /* Global leaderboard endpoint (Lambda Function URL). Only enabled when the
    game is served from github.io: the API's CORS is pinned to that origin,
@@ -549,6 +549,17 @@ function isGameOverWithRotate(board, tray, rotateCount) {
   return true;
 }
 
+/* Item-aware game over, the full escape-hatch check. A Reroll in stock is
+   always a possible way out (the swapped piece might fit, and she deserves
+   the chance to try), so a stuck tray only truly ends the game once no
+   Reroll is held and no rotation can rescue any piece. */
+function isGameOverWithItems(board, tray, rotateCount, rerollCount) {
+  const remaining = tray.filter(Boolean);
+  if (remaining.length === 0) return false;
+  if (rerollCount > 0) return false;
+  return isGameOverWithRotate(board, tray, rotateCount);
+}
+
 /* ---- Persistence (schema v2; v1 saves migrate) ---- */
 
 function defaultMeta() {
@@ -827,7 +838,7 @@ if (typeof module !== 'undefined' && module.exports) {
     ITEM_CAPS, SCORE_LOG_MAX, STREAK_LOG_MAX, computeEarned, grantItems,
     rotateShapeCells, ROTATION_MAP, applyRotation, rerollPiece, applyReroll, freezeOutcome,
     makeScoreLogEntry, pushLog, takeSnapshot,
-    pickShapeId, pickIcon, makePiece, genTray, isGameOver, isGameOverWithRotate, rotationRescues,
+    pickShapeId, pickIcon, makePiece, genTray, isGameOver, isGameOverWithRotate, isGameOverWithItems, rotationRescues,
     defaultMeta, frozenMaskToList, encodeGame, validateSave, sanitizeNickname,
   };
 }
@@ -1543,6 +1554,40 @@ function initUI() {
   /* ---- Turn resolution.
      All game state mutates synchronously up front so autosave is always
      consistent; the DOM catches up during the animation phase. ---- */
+  /* The shared force-melt for a game that is about to end: score the frozen
+     units as one combo, clear them, and reset the freeze system. Mutates the
+     live state; the caller re-runs the fit test (the freed space can rescue
+     the game) and drives the visuals from the returned melt object. */
+  function forceMeltAtGameOver() {
+    const mUnits = scanUnits(board);
+    const mBonuses = iconBonuses(board, mUnits);
+    const mMs = matchingSetBonuses(mBonuses);
+    const melt = {
+      n: mUnits.length,
+      union: unionCells(mUnits),
+      delays: computeClearDelays(mUnits),
+      gained: clearScore(mUnits.length)
+        + mBonuses.reduce((a, b) => a + b.points, 0)
+        + mMs.reduce((a, b) => a + b.points, 0),
+      newBest: false,
+    };
+    for (const idx of melt.union) board[idx] = -1;
+    frozen = new Uint8Array(CELL_COUNT);
+    freezeHold = false;
+    score += melt.gained;
+    if (score > best) { best = score; melt.newBest = true; }
+    const meltEarn = computeEarned(progress, {
+      gained: melt.gained,
+      comboN: melt.n,
+      perfectCount: mBonuses.filter((b) => b.perfect).length,
+      streak: 0,
+      msCombo: mMs.length > 0,
+    });
+    progress = meltEarn.progress;
+    melt.granted = grantItems(inv, meltEarn.earned);
+    return melt;
+  }
+
   async function resolveTurn(slotIdx, row, col) {
     state = 'RESOLVING';
     /* Everything a turn can change, captured before any mutation */
@@ -1641,45 +1686,23 @@ function initUI() {
     const refilled = tray.every((p) => p === null);
     if (refilled) tray = genTray(board, rng);
 
-    /* 5. Fit test on the post-clear board. Rotate-aware: a Rotate in stock (or
-       an open spin session) can rescue a piece, so the plain test short-circuits
-       the cheap common case before the orbit walk. */
-    let over = isGameOver(board, tray) && isGameOverWithRotate(board, tray, inv.rotate);
+    /* 5. Fit test on the post-clear board. Item-aware: a Rotate in stock (or
+       an open spin session) can rescue a piece and a held Reroll always
+       offers a way out, so the plain test short-circuits the cheap common
+       case before the orbit walk. */
+    let over = isGameOver(board, tray) && isGameOverWithItems(board, tray, inv.rotate, inv.reroll);
 
     /* A pending freeze force-melts at game over; the space it frees can
        rescue the game, so the fit test runs again afterwards. */
     let melt = null;
     if (over && freezeHold) {
-      const mUnits = scanUnits(board);
-      const mBonuses = iconBonuses(board, mUnits);
-      const mMs = matchingSetBonuses(mBonuses);
-      melt = {
-        n: mUnits.length,
-        union: unionCells(mUnits),
-        delays: computeClearDelays(mUnits),
-        gained: clearScore(mUnits.length)
-          + mBonuses.reduce((a, b) => a + b.points, 0)
-          + mMs.reduce((a, b) => a + b.points, 0),
-      };
-      for (const idx of melt.union) board[idx] = -1;
-      frozen = new Uint8Array(CELL_COUNT);
-      freezeHold = false;
-      score += melt.gained;
-      if (score > best) { best = score; newBest = true; }
-      const meltEarn = computeEarned(progress, {
-        gained: melt.gained,
-        comboN: melt.n,
-        perfectCount: mBonuses.filter((b) => b.perfect).length,
-        streak: 0,
-        msCombo: mMs.length > 0,
-      });
-      progress = meltEarn.progress;
-      const meltGranted = grantItems(inv, meltEarn.earned);
-      for (const k of Object.keys(granted)) granted[k] += meltGranted[k];
+      melt = forceMeltAtGameOver();
+      if (melt.newBest) newBest = true;
+      for (const k of Object.keys(granted)) granted[k] += melt.granted[k];
       /* No history append: a force-melt only ever happens at game over, where
          the save is nulled anyway. The DOM phase may still build an ad hoc
          entry for the melt toast, but nothing is logged. */
-      over = isGameOverWithRotate(board, tray, inv.rotate);
+      over = isGameOverWithItems(board, tray, inv.rotate, inv.reroll);
     }
 
     /* ---- DOM phase ---- */
@@ -1783,9 +1806,11 @@ function initUI() {
     } else {
       state = 'IDLE';
       /* All current orientations are stuck, so the only reason the game is
-         still alive is a rotate rescue. Tell her. */
+         still alive is an item rescue. Tell her which one. */
       if (!tutorial && isGameOver(board, tray)) {
-        showToast('item-toast', '⟳ Stuck? Rotating a piece can still save you!');
+        showToast('item-toast', isGameOverWithRotate(board, tray, inv.rotate)
+          ? '\u{1F3B2} Stuck? A Reroll can still save you!'
+          : '⟳ Stuck? Rotating a piece can still save you!');
       }
       /* The tutorial teaches items hands-on; its crafted melt can earn a
          Rotate/Freeze, so suppress the first-earn help card here (it would
@@ -2352,6 +2377,9 @@ function initUI() {
     }
     /* The bar icon spins while any piece still has free rotations */
     itemBtns.rotate.classList.toggle('spinning', tray.some((p) => p && p.rotFree));
+    /* When the tray is stuck, a held Reroll is a way out: pulse it. */
+    itemBtns.reroll.classList.toggle('rescue',
+      !tutorial && inv.reroll > 0 && isGameOver(board, tray));
   }
 
   function announceEarned(granted) {
@@ -2513,7 +2541,47 @@ function initUI() {
     renderTray();
     updateItemsBar();
     persist();
-    if (tutorial) tutAdvance();
+    if (tutorial) { tutAdvance(); return; }
+    /* A last-hope reroll that fails ends the game right here, no placement
+       needed: the swap was the escape hatch that kept the fit test alive. */
+    if (isGameOver(board, tray) && isGameOverWithItems(board, tray, inv.rotate, inv.reroll)) {
+      endGameFromReroll();
+    }
+  }
+
+  /* Game over reached through a failed reroll instead of a placement.
+     Mirrors resolveTurn's ending: a pending freeze force-melts first (the
+     space it frees, or an item it earns, can still rescue the game), and
+     only then the card shows. */
+  async function endGameFromReroll() {
+    state = 'RESOLVING';
+    let newBest = false;
+    if (freezeHold) {
+      const melt = forceMeltAtGameOver();
+      newBest = melt.newBest;
+      sound.clear(melt.n);
+      for (const idx of melt.union) {
+        const cell = cellEls[idx];
+        cell.classList.add('clearing');
+        cell.style.animationDelay = (reducedMotion ? 0 : melt.delays.get(idx)) + 'ms';
+      }
+      spawnParticles(melt.union);
+      await wait(reducedMotion ? 160 : CLEAR_WAIT);
+      renderBoard();
+      updateScoreDisplay();
+      renderTray();
+      updateItemsBar();
+      announceEarned(melt.granted);
+      maybeShowItemHelp(melt.granted);
+      if (!isGameOverWithItems(board, tray, inv.rotate, inv.reroll)) {
+        state = 'IDLE';
+        persist();
+        return;
+      }
+    }
+    persist();
+    await wait(GAMEOVER_DELAY);
+    showGameOver(newBest);
   }
 
   /* ---- Interactive tutorial. Runs on the real engine against crafted
@@ -3192,7 +3260,7 @@ function initUI() {
       if (tutorial) return; /* the tutorial never touches the real save */
       meta.best = best;
       meta.muted = sound.isMuted();
-      const over = state === 'GAME_OVER' || isGameOverWithRotate(board, tray, inv.rotate);
+      const over = state === 'GAME_OVER' || isGameOverWithItems(board, tray, inv.rotate, inv.reroll);
       const game = over ? null : encodeGame({ board, tray, score, inv, progress, frozen, freezeHold, streak, scoreLog, streakLog });
       storeBlob(SAVE_KEY, JSON.stringify({ v: 2, ...meta, game }));
     } catch (err) { /* storage may be unavailable; play on */ }
@@ -3220,7 +3288,7 @@ function initUI() {
     meta = savedMeta;
     best = save.best;
     sound.setMuted(save.muted);
-    if (game && !isGameOverWithRotate(game.board, game.tray, game.inv.rotate)) {
+    if (game && !isGameOverWithItems(game.board, game.tray, game.inv.rotate, game.inv.reroll)) {
       board = game.board;
       tray = game.tray;
       score = game.score;

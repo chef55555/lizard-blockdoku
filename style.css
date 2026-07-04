@@ -664,8 +664,9 @@ header { text-align: center; height: 56px; flex: none; }
   border-color: transparent;
   color: #fff;
 }
-/* Rotation is the only move left: the arrow pulses to point the way out. */
-.rot-btn.rescue { animation: rot-rescue 1s ease-in-out infinite; }
+/* An item is the only move left: its button pulses to point the way out
+   (the rotate arrow on a rescuable piece, or the Reroll on the bar). */
+.rot-btn.rescue, .item-btn.rescue { animation: rot-rescue 1s ease-in-out infinite; }
 @keyframes rot-rescue {
   0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(138, 79, 191, 0.55); }
   50% { transform: scale(1.2); box-shadow: 0 0 0 9px rgba(138, 79, 191, 0); }
@@ -1345,7 +1346,7 @@ header { text-align: center; height: 56px; flex: none; }
 
 @media (prefers-reduced-motion: reduce) {
   #floaters span, .splash-mascot, .splash-tap, #title .mascot { animation: none; }
-  .rot-btn.rescue { animation: none; box-shadow: 0 0 0 4px rgba(138, 79, 191, 0.45); }
+  .rot-btn.rescue, .item-btn.rescue { animation: none; box-shadow: 0 0 0 4px rgba(138, 79, 191, 0.45); }
   .cell.pop { animation: none; }
   .piece.spin, .item-btn.bounce { animation: none; }
   #itemRotate.spinning .ic { animation: none; }

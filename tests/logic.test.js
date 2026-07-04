@@ -369,6 +369,26 @@ test('isGameOverWithRotate: empty tray is never game over', () => {
   assert.strictEqual(G.isGameOverWithRotate(full, [null, null, null], 3), false);
 });
 
+test('isGameOverWithItems: a Reroll in stock always keeps a stuck tray alive', () => {
+  const b = gapBoard();
+  const tray = [{ shapeId: 13, icon: 1 }, null, null]; /* square, fits nowhere, no orbit */
+  assert.strictEqual(G.isGameOverWithItems(b, tray, 0, 1), false, 'the swap might fit');
+  assert.strictEqual(G.isGameOverWithItems(b, tray, 0, 0), true, 'no items, truly over');
+  assert.strictEqual(G.isGameOverWithItems(b, tray, 3, 0), true, 'rotating a square does nothing');
+});
+
+test('isGameOverWithItems: defers to the rotate orbit when no Reroll is held', () => {
+  const b = gapBoard();
+  const tray = [{ shapeId: 5, icon: 1 }, null, null]; /* Line3, fits only rotated */
+  assert.strictEqual(G.isGameOverWithItems(b, tray, 1, 0), false, 'the Rotate rescues');
+  assert.strictEqual(G.isGameOverWithItems(b, tray, 0, 0), true, 'nothing left');
+});
+
+test('isGameOverWithItems: empty tray is never game over', () => {
+  const full = new Int8Array(81).fill(1);
+  assert.strictEqual(G.isGameOverWithItems(full, [null, null, null], 0, 0), false);
+});
+
 test('rotationRescues: true only when a reachable orientation fits', () => {
   const b = gapBoard();
   const line3 = { shapeId: 5, icon: 1 }; /* horizontal Line3, fits only rotated */
