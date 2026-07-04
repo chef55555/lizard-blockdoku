@@ -15,6 +15,13 @@ in two channels, production and beta (same code, beta is served under a `-beta` 
 
 ## Deploy conventions
 
+- **Beta pushes**: when a version's work is committed and verified, push it to
+  the beta repo so it deploys to the beta channel:
+  `git push beta <version-branch>:main` (remote `beta` =
+  github.com/chef55555/lizard-blockdoku-beta, GitHub Pages serves its `main`).
+  Then verify the live site with
+  `node tests/live-check.mjs https://chef55555.github.io/lizard-blockdoku-beta/`.
+  Production deploys are separate: merge to `main` and push `origin main`.
 - Bump `APP_BUILD` in `src/logic/config.js` and the `CACHE` version in `sw.js`
   together on every deploy; they are numerically aligned (build 21 = cache v21).
 - No bundler: every new module under `src/` must be added to `ASSETS` in
