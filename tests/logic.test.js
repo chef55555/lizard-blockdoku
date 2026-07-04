@@ -369,6 +369,19 @@ test('isGameOverWithRotate: empty tray is never game over', () => {
   assert.strictEqual(G.isGameOverWithRotate(full, [null, null, null], 3), false);
 });
 
+test('rotationRescues: true only when a reachable orientation fits', () => {
+  const b = gapBoard();
+  const line3 = { shapeId: 5, icon: 1 }; /* horizontal Line3, fits only rotated */
+  assert.strictEqual(G.rotationRescues(b, line3, 1), true, 'a stocked Rotate reaches the fit');
+  assert.strictEqual(G.rotationRescues(b, line3, 0), false, 'no Rotate, orbit locked');
+  assert.strictEqual(G.rotationRescues(b, { ...line3, rotFree: true, rotOrig: 6 }, 0), true,
+    'an open session spins for free');
+  assert.strictEqual(G.rotationRescues(b, { shapeId: 13, icon: 1 }, 3), false,
+    'a symmetric square has no orbit to walk');
+  assert.strictEqual(G.rotationRescues(b, { shapeId: 43, icon: 1 }, 1), false,
+    'no U pentomino orientation fits the 3-gap');
+});
+
 /* ---- Persistence ---- */
 
 test('save v2 round-trip preserves everything', () => {

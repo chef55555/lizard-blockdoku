@@ -20,7 +20,7 @@ const SAVE_KEY = IS_BETA ? 'lizard-blockdoku-beta' : 'lizard-blockdoku-v1';
    APP_BUILD must be bumped together with the sw.js CACHE version on every
    deploy: they are numerically aligned (build 13 = cache v13). */
 const APP_VERSION = 'v2.3';
-const APP_BUILD = 14;
+const APP_BUILD = 15;
 
 /* Global leaderboard endpoint (Lambda Function URL). Only enabled when the
    game is served from github.io: the API's CORS is pinned to that origin,
@@ -523,6 +523,17 @@ function isGameOver(board, tray) {
   return remaining.length > 0 && remaining.every((p) => !fitsSomewhere(board, SHAPES[p.shapeId]));
 }
 
+/* True when this piece could fit in some rotated orientation it can reach:
+   free spins cost nothing, otherwise one Rotate in stock unlocks the whole
+   orbit. Symmetric shapes have an empty orbit, so they never rescue. */
+function rotationRescues(board, piece, rotateCount) {
+  if (!piece.rotFree && rotateCount <= 0) return false;
+  for (let id = ROTATION_MAP[piece.shapeId]; id !== piece.shapeId; id = ROTATION_MAP[id]) {
+    if (fitsSomewhere(board, SHAPES[id])) return true;
+  }
+  return false;
+}
+
 /* Rotate-aware game over. Not over if any piece fits as-is, if a piece with
    an open free-spin session fits in any of its orientations, or if a Rotate
    in stock could open such a session on any one piece. One Rotate unlocks a
@@ -533,11 +544,7 @@ function isGameOverWithRotate(board, tray, rotateCount) {
   if (remaining.length === 0) return false;
   for (const p of remaining) {
     if (fitsSomewhere(board, SHAPES[p.shapeId])) return false;
-    if (p.rotFree || rotateCount > 0) {
-      for (let id = ROTATION_MAP[p.shapeId]; id !== p.shapeId; id = ROTATION_MAP[id]) {
-        if (fitsSomewhere(board, SHAPES[id])) return false;
-      }
-    }
+    if (rotationRescues(board, p, rotateCount)) return false;
   }
   return true;
 }
@@ -820,7 +827,7 @@ if (typeof module !== 'undefined' && module.exports) {
     ITEM_CAPS, SCORE_LOG_MAX, STREAK_LOG_MAX, computeEarned, grantItems,
     rotateShapeCells, ROTATION_MAP, applyRotation, rerollPiece, applyReroll, freezeOutcome,
     makeScoreLogEntry, pushLog, takeSnapshot,
-    pickShapeId, pickIcon, makePiece, genTray, isGameOver, isGameOverWithRotate,
+    pickShapeId, pickIcon, makePiece, genTray, isGameOver, isGameOverWithRotate, rotationRescues,
     defaultMeta, frozenMaskToList, encodeGame, validateSave, sanitizeNickname,
   };
 }
@@ -1195,6 +1202,8 @@ function initUI() {
   }
 
   function renderTray() {
+    const fits = tray.map((p) => !!p && fitsSomewhere(board, SHAPES[p.shapeId]));
+    const plainStuck = tray.some(Boolean) && !fits.some(Boolean);
     slotEls.forEach((slot, i) => {
       slot.textContent = '';
       slot.classList.remove('dead');
@@ -1203,18 +1212,20 @@ function initUI() {
       slot.appendChild(buildPieceEl(piece, '--tray-cell'));
       /* Symmetric shapes have nothing to rotate, so they never show the arrow. */
       if ((inv.rotate > 0 || piece.rotFree) && ROTATION_MAP[piece.shapeId] !== piece.shapeId) {
-        slot.appendChild(buildRotBtn(i, piece.rotFree));
+        /* When rotation is the only move left, the arrow pulses to point the way. */
+        const rescue = plainStuck && rotationRescues(board, piece, inv.rotate);
+        slot.appendChild(buildRotBtn(i, piece.rotFree, rescue));
       }
-      if (!fitsSomewhere(board, SHAPES[piece.shapeId])) slot.classList.add('dead');
+      if (!fits[i]) slot.classList.add('dead');
     });
   }
 
   /* Per-slot rotate button. Its pointerdown never reaches the slot, so
      tapping it can never begin a drag. */
-  function buildRotBtn(i, free) {
+  function buildRotBtn(i, free, rescue) {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'rot-btn' + (free ? ' free' : '');
+    b.className = 'rot-btn' + (free ? ' free' : '') + (rescue ? ' rescue' : '');
     b.textContent = '⟳';
     b.setAttribute('aria-label', free ? 'Rotate this piece (free)' : 'Rotate this piece');
     b.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); });

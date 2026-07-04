@@ -664,6 +664,12 @@ header { text-align: center; height: 56px; flex: none; }
   border-color: transparent;
   color: #fff;
 }
+/* Rotation is the only move left: the arrow pulses to point the way out. */
+.rot-btn.rescue { animation: rot-rescue 1s ease-in-out infinite; }
+@keyframes rot-rescue {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(138, 79, 191, 0.55); }
+  50% { transform: scale(1.2); box-shadow: 0 0 0 9px rgba(138, 79, 191, 0); }
+}
 
 .item-btn .ic { display: inline-block; }
 #itemRotate.spinning .ic { animation: spin-slow 1.4s linear infinite; }
@@ -716,7 +722,9 @@ header { text-align: center; height: 56px; flex: none; }
   touch-action: none;
   transition: opacity 200ms ease, filter 200ms ease;
 }
-.slot.dead { opacity: 0.4; filter: grayscale(60%); }
+/* Grey a dead slot's piece only: the rotate arrow must stay vivid, because
+   rotating might be exactly the move that saves the game. */
+.slot.dead .piece { opacity: 0.4; filter: grayscale(60%); }
 .slot.lifted { opacity: 0.2; }
 
 .piece { display: grid; pointer-events: none; }
@@ -1337,6 +1345,7 @@ header { text-align: center; height: 56px; flex: none; }
 
 @media (prefers-reduced-motion: reduce) {
   #floaters span, .splash-mascot, .splash-tap, #title .mascot { animation: none; }
+  .rot-btn.rescue { animation: none; box-shadow: 0 0 0 4px rgba(138, 79, 191, 0.45); }
   .cell.pop { animation: none; }
   .piece.spin, .item-btn.bounce { animation: none; }
   #itemRotate.spinning .ic { animation: none; }
