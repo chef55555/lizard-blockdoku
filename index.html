@@ -6,6 +6,20 @@
   <meta name="theme-color" content="#8A4FBF">
   <title>Lizard Block Mania</title>
   <link rel="manifest" href="manifest.webmanifest">
+  <script>
+    /* Beta channel only: the identical tree ships to both repos, so at runtime
+       (when the '-beta' subpath is served) swap in the beta manifest, the
+       apple-touch icon, and the title so a side-by-side install is visually
+       distinct. Guards are defensive: links parsed later in <head> may be absent
+       when this runs. */
+    if (location.pathname.includes('-beta')) {
+      const mlink = document.querySelector('link[rel="manifest"]');
+      if (mlink) mlink.setAttribute('href', './manifest-beta.webmanifest');
+      const atouch = document.querySelector('link[rel="apple-touch-icon"]');
+      if (atouch) atouch.setAttribute('href', 'icons/icon-beta-192.png');
+      document.title += ' (beta)';
+    }
+  </script>
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="style.css">
