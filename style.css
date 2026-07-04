@@ -1244,3 +1244,13 @@ header { text-align: center; height: 56px; flex: none; }
   #tray { height: 80px; }
   .bg-blob, #floaters { display: none; }
 }
+
+/* Version/build line at the foot of Settings: subtle so it never clutters
+   the gift; muted via --text-soft so both themes inherit it. */
+.version-line {
+  color: var(--text-soft);
+  font-size: 11px;
+  text-align: center;
+  margin-top: 14px;
+  opacity: 0.75;
+}

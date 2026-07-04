@@ -16,6 +16,12 @@ const PLAYER_NAME = 'Lizard';
 const IS_BETA = typeof location !== 'undefined' && location.pathname.includes('-beta');
 const SAVE_KEY = IS_BETA ? 'lizard-blockdoku-beta' : 'lizard-blockdoku-v1';
 
+/* App version shown in Settings so a stale service worker is easy to spot.
+   APP_BUILD must be bumped together with the sw.js CACHE version on every
+   deploy: they are numerically aligned (build 12 = cache v12). */
+const APP_VERSION = 'v2.2';
+const APP_BUILD = 12;
+
 /* Global leaderboard endpoint (Lambda Function URL). Only enabled when the
    game is served from github.io: the API's CORS is pinned to that origin,
    so calls from anywhere else (localhost dev, the test suite) could never
@@ -2740,6 +2746,13 @@ function initUI() {
   const nickInput = $('nickInput');
   const themeButtons = Array.from(document.querySelectorAll('#themeSeg button'));
   const themeMedia = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+  /* Build/version line: composed once from the constants (never hardcoded)
+     so a stale service worker is easy to spot at the bottom of Settings. */
+  const versionLine = $('versionLine');
+  if (versionLine) {
+    versionLine.textContent = APP_VERSION + ' (build ' + APP_BUILD + (IS_BETA ? ', beta' : '') + ')';
+  }
 
   /* 'auto' follows the system; the resolved value is always stamped on the
      root so the CSS only ever has to know about data-theme="dark". */

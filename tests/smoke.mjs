@@ -246,6 +246,12 @@ console.log('7c. Settings: volume, dark mode, nickname');
 await page.tap('#muteBtn'); // mute, then verify the volume slider unmutes
 await page.tap('#settingsBtn');
 await page.waitForSelector('#settings:not([hidden])');
+{
+  const vl = page.locator('#versionLine');
+  const vText = await vl.textContent();
+  // localhost is the production (non-beta) channel: no ', beta' suffix.
+  check('settings shows the build version', (await vl.count()) === 1 && /^v\d+\.\d+ \(build \d+\)$/.test(vText), vText);
+}
 await page.locator('#volSlider').fill('80');
 check('volume slider unmutes', (await page.locator('#muteBtn').textContent()).includes(UNMUTED));
 await page.tap('#themeSeg button[data-theme-choice="dark"]');
