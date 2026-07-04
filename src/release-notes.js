@@ -1,0 +1,63 @@
+/* Release notes shown from Settings ("What's new"). Latest release first.
+   Every user-visible change ships with an entry here (see CLAUDE.md). */
+
+const RELEASE_NOTES = [
+  {
+    version: 'v2.4',
+    date: '2026-07-04',
+    notes: [
+      'New item: Flip! Mirrors a tray piece left-to-right. One for every 300 points, and flipping back returns it.',
+      'Freeze fix: a dip that freezes nothing new now returns the Freeze AND lets the waiting sets melt, instead of holding them for free.',
+      'A held Flip now counts when the game checks whether you are truly stuck.',
+      'This "What’s new" list, right here in Settings.',
+      'Beta: a Test scenarios panel with preset boards, piece and icon filters, and a 1x1-reroll switch.',
+    ],
+  },
+  {
+    version: 'v2.3',
+    date: '2026-07-04',
+    notes: [
+      'Game over got smarter: it knows when a Rotate or a held Reroll can still save you, and the way out pulses.',
+      'Freezes stack: keep dipping pieces and melt everything as one giant combo.',
+      'Pieces follow your finger instantly, and Perfect Matches celebrate with per-icon flourishes.',
+      'The tutorial teaches 3x3 boxes, your save gets an extra backup, and Settings can reset all data.',
+    ],
+  },
+  {
+    version: 'v2.2',
+    date: '2026-07-03',
+    notes: [
+      'New item: Reroll! Swap a tray piece for a fresh one.',
+      'New U piece and a butterfly icon joined the board.',
+      'Freezes are easier to earn, scoring help shows worked examples, and new panels track recent scores and streaks.',
+      'A hands-on tutorial walks through every move and item.',
+    ],
+  },
+  {
+    version: 'v2.1',
+    date: '2026-07-03',
+    notes: [
+      'Pieces pop out from under your finger when picked up.',
+      'Streaks: clear on back-to-back placements for rising bonuses.',
+      'Rotations can be spun back to cancel for a refund, and everything sounds louder and juicier.',
+    ],
+  },
+  {
+    version: 'v2.0',
+    date: '2026-07-03',
+    notes: [
+      'Items arrived: Rotate, Undo, and Freeze, earned by playing well.',
+      'A global leaderboard, an interactive tutorial, and escalating clear celebrations.',
+      'Settings with volume, light/dark themes, and a nickname.',
+    ],
+  },
+  {
+    version: 'v1.0',
+    date: '2026-07-02',
+    notes: [
+      'The first release: a pink and purple Blockudoku with icon match bonuses, made with love for Lizard.',
+    ],
+  },
+];
+
+export { RELEASE_NOTES };

@@ -590,7 +590,7 @@ header { text-align: center; height: 56px; flex: none; }
   height: 44px;
   flex: none;
   display: flex;
-  gap: 16px;
+  gap: 12px; /* five 40px buttons must fit a 320px viewport */
   align-items: center;
   justify-content: center;
 }
@@ -640,12 +640,11 @@ header { text-align: center; height: 56px; flex: none; }
   margin-bottom: 6px;
 }
 
-/* Per-slot rotate button (visible while rotates are held or the piece
-   still has free spins) */
-.rot-btn {
+/* Per-slot rotate and flip buttons (visible while the item is held or the
+   piece still has an open session), one in each top corner of the slot. */
+.rot-btn, .flip-btn {
   position: absolute;
   top: 2px;
-  right: 2px;
   width: 34px;
   height: 34px;
   border-radius: 50%;
@@ -658,15 +657,18 @@ header { text-align: center; height: 56px; flex: none; }
   z-index: 2;
   touch-action: none;
 }
-.rot-btn:active { transform: scale(0.9); }
-.rot-btn.free {
+.rot-btn { right: 2px; }
+.flip-btn { left: 2px; }
+.rot-btn:active, .flip-btn:active { transform: scale(0.9); }
+.rot-btn.free, .flip-btn.free {
   background: var(--btn-grad);
   border-color: transparent;
   color: #fff;
 }
 /* An item is the only move left: its button pulses to point the way out
-   (the rotate arrow on a rescuable piece, or the Reroll on the bar). */
-.rot-btn.rescue, .item-btn.rescue { animation: rot-rescue 1s ease-in-out infinite; }
+   (the rotate arrow or flip arrow on a rescuable piece, or the Reroll on
+   the bar). */
+.rot-btn.rescue, .flip-btn.rescue, .item-btn.rescue { animation: rot-rescue 1s ease-in-out infinite; }
 @keyframes rot-rescue {
   0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(138, 79, 191, 0.55); }
   50% { transform: scale(1.2); box-shadow: 0 0 0 9px rgba(138, 79, 191, 0); }
@@ -676,6 +678,11 @@ header { text-align: center; height: 56px; flex: none; }
 #itemRotate.spinning .ic { animation: spin-slow 1.4s linear infinite; }
 @keyframes spin-slow {
   to { transform: rotate(360deg); }
+}
+#itemFlip.mirroring .ic { animation: sway-flip 1.4s ease-in-out infinite; }
+@keyframes sway-flip {
+  0%, 100% { transform: scaleX(1); }
+  50% { transform: scaleX(-1); }
 }
 
 .item-btn.armed {
@@ -698,6 +705,12 @@ header { text-align: center; height: 56px; flex: none; }
 @keyframes spin-in {
   from { transform: rotate(-90deg) scale(0.85); }
   to   { transform: rotate(0) scale(1); }
+}
+
+.piece.mirror { animation: mirror-in 220ms ease; }
+@keyframes mirror-in {
+  from { transform: scaleX(-0.85) scaleY(0.85); }
+  to   { transform: scaleX(1) scaleY(1); }
 }
 
 /* ---- Tray ---- */
@@ -1144,6 +1157,31 @@ header { text-align: center; height: 56px; flex: none; }
 #scoreHelpBtn { margin: 4px 0 12px; }
 #settingsDone { margin-top: 14px; }
 
+/* ---- Beta test panel ---- */
+
+.test-list { display: grid; gap: 6px; margin-bottom: 10px; }
+.check-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px 12px;
+  margin: 6px 0 12px;
+}
+.check-grid.icons { grid-template-columns: repeat(3, 1fr); }
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.ex-note {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--muted, inherit);
+  opacity: 0.8;
+  margin: 0 0 10px;
+}
+
 /* ---- Scoring sheet ---- */
 
 .sheet {
@@ -1346,10 +1384,10 @@ header { text-align: center; height: 56px; flex: none; }
 
 @media (prefers-reduced-motion: reduce) {
   #floaters span, .splash-mascot, .splash-tap, #title .mascot { animation: none; }
-  .rot-btn.rescue, .item-btn.rescue { animation: none; box-shadow: 0 0 0 4px rgba(138, 79, 191, 0.45); }
+  .rot-btn.rescue, .flip-btn.rescue, .item-btn.rescue { animation: none; box-shadow: 0 0 0 4px rgba(138, 79, 191, 0.45); }
   .cell.pop { animation: none; }
-  .piece.spin, .item-btn.bounce { animation: none; }
-  #itemRotate.spinning .ic { animation: none; }
+  .piece.spin, .piece.mirror, .item-btn.bounce { animation: none; }
+  #itemRotate.spinning .ic, #itemFlip.mirroring .ic { animation: none; }
   .toast { animation: none; }
   .toast.out, .toast.out-fast { animation: reduced-toast-out 200ms ease-out forwards; }
   .cell.clearing { animation: reduced-clear 150ms ease-out forwards; }
@@ -1393,6 +1431,25 @@ header { text-align: center; height: 56px; flex: none; }
   margin-top: 14px;
   opacity: 0.75;
 }
+
+/* Inline text button in the version line ("What's new"). */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Release-notes bullets inside the What's-new sheet. */
+.notes-list {
+  margin: 4px 0 12px;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.notes-list li { margin-bottom: 4px; }
 
 /* ---- Zoomed mini board (tap a Recent-scores board to inspect it) ---- */
 

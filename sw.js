@@ -7,7 +7,7 @@
 const CHANNEL = self.location.pathname.includes('-beta') ? '-beta' : '';
 
 /* Bump CACHE on every deploy so updates reach installed phones. */
-const CACHE = 'lizard-blockdoku' + CHANNEL + '-v20';
+const CACHE = 'lizard-blockdoku' + CHANNEL + '-v21';
 /* No bundler: every ES module the app loads must be listed here, or a first
    load after an update can fetch a stale/missing module. Add new src/ files
    whenever they are created. */
@@ -17,6 +17,7 @@ const ASSETS = [
   './style.css',
   './src/main.js',
   './src/idb.js',
+  './src/release-notes.js',
   './src/logic/index.js',
   './src/logic/config.js',
   './src/logic/pieces.js',
@@ -25,6 +26,7 @@ const ASSETS = [
   './src/logic/history.js',
   './src/logic/generate.js',
   './src/logic/persist.js',
+  './src/logic/scenarios.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',

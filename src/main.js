@@ -3,6 +3,7 @@
    unchanged. See the refactor plan for the module map. */
 import * as L from './logic/index.js';
 import { idb, MIRROR_KEYS, preloadFromIdb, mirrorAllToIdb } from './idb.js';
+import { RELEASE_NOTES } from './release-notes.js';
 
 const {
   PLAYER_NAME, IS_BETA, SAVE_KEY, APP_VERSION, APP_BUILD, LEADERBOARD_URL,
@@ -11,10 +12,12 @@ const {
   placePiece, scanUnits, unionCells, clearScore, streakBonus, iconBonusTier,
   iconBonuses, matchingSetsTier, matchingSetBonuses, ITEM_CAPS,
   SCORE_LOG_MAX, STREAK_LOG_MAX, computeEarned, grantItems, ROTATION_MAP,
-  applyRotation, applyReroll, freezeOutcome, boardToLogString,
+  FLIP_MAP, applyRotation, applyFlip, applyReroll, freezeOutcome, boardToLogString,
   makeScoreLogEntry, pushLog, takeSnapshot, genTray, isGameOver,
-  rotationRescues, isGameOverWithRotate, isGameOverWithItems, defaultMeta,
+  rotationRescues, flipRescues, isGameOverWithRotate, isGameOverWithItems, defaultMeta,
   encodeGame, sanitizeNickname, validateSave,
+  SCENARIOS, buildScenario, SHAPE_CLASS_META,
+  setShapeClassFilter, setIconFilter, setRerollForce1x1,
 } = L;
 
 /* ================================================================
@@ -76,8 +79,8 @@ function initUI() {
   let tray = [null, null, null];
   let score = 0;
   let best = 0;
-  let inv = { rotate: 0, undo: 0, freeze: 0, reroll: 0 };
-  let progress = { pts: 0, combos: 0, fcombos: 0 };
+  let inv = { rotate: 0, flip: 0, undo: 0, freeze: 0, reroll: 0 };
+  let progress = { pts: 0, flipPts: 0, combos: 0, fcombos: 0 };
   let frozen = new Uint8Array(CELL_COUNT);
   let freezeHold = false;
   let streak = 0;                 /* consecutive clearing placements */
@@ -331,6 +334,11 @@ function initUI() {
         const rescue = plainStuck && rotationRescues(board, piece, inv.rotate);
         slot.appendChild(buildRotBtn(i, piece.rotFree, rescue));
       }
+      /* Mirror-symmetric shapes have nothing to flip, so no mirror button. */
+      if ((inv.flip > 0 || piece.flipFree) && FLIP_MAP[piece.shapeId] !== piece.shapeId) {
+        const rescue = plainStuck && flipRescues(board, piece, inv.flip);
+        slot.appendChild(buildFlipBtn(i, piece.flipFree, rescue));
+      }
       if (!fits[i]) slot.classList.add('dead');
     });
   }
@@ -345,6 +353,18 @@ function initUI() {
     b.setAttribute('aria-label', free ? 'Rotate this piece (free)' : 'Rotate this piece');
     b.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); });
     b.addEventListener('pointerup', (e) => { e.stopPropagation(); rotateSlot(i); });
+    return b;
+  }
+
+  /* Per-slot flip button: the rotate arrow's mirror twin, in the other corner. */
+  function buildFlipBtn(i, free, rescue) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'flip-btn' + (free ? ' free' : '') + (rescue ? ' rescue' : '');
+    b.textContent = '⇄';
+    b.setAttribute('aria-label', free ? 'Flip this piece (free)' : 'Flip this piece');
+    b.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); });
+    b.addEventListener('pointerup', (e) => { e.stopPropagation(); flipSlot(i); });
     return b;
   }
 
@@ -375,6 +395,35 @@ function initUI() {
     updateItemsBar();
     const el = slotEls[i].querySelector('.piece');
     if (el && !reducedMotion) el.classList.add('spin');
+    persist();
+  }
+
+  /* One Flip mirrors that piece until it is placed; flipping it back to the
+     start cancels the session and refunds the item. Mirrors rotateSlot. */
+  function flipSlot(i) {
+    if (state !== 'IDLE') return;
+    const piece = tray[i];
+    if (!piece) return;
+    const res = applyFlip(piece, inv.flip);
+    if (!res) return;
+    sound.rotate();
+    if (res.kind === 'symmetric') {
+      /* Nothing to mirror; just a playful little sway, no state change. */
+      const el = slotEls[i].querySelector('.piece');
+      if (el && !reducedMotion) { el.classList.remove('mirror'); void el.offsetWidth; el.classList.add('mirror'); }
+      return;
+    }
+    inv.flip = res.flipCount;
+    tray[i] = res.piece;
+    if (res.kind === 'canceled') {
+      showToast('item-toast', res.refunded
+        ? '⇄ Back where it started, Flip returned!'
+        : '⇄ Back where it started!');
+    }
+    renderTray();
+    updateItemsBar();
+    const el = slotEls[i].querySelector('.piece');
+    if (el && !reducedMotion) el.classList.add('mirror');
     persist();
   }
 
@@ -790,11 +839,11 @@ function initUI() {
     const refilled = tray.every((p) => p === null);
     if (refilled) tray = genTray(board, rng);
 
-    /* 5. Fit test on the post-clear board. Item-aware: a Rotate in stock (or
-       an open spin session) can rescue a piece and a held Reroll always
+    /* 5. Fit test on the post-clear board. Item-aware: a Rotate or Flip in
+       stock (or an open session) can rescue a piece and a held Reroll always
        offers a way out, so the plain test short-circuits the cheap common
        case before the orbit walk. */
-    let over = isGameOver(board, tray) && isGameOverWithItems(board, tray, inv.rotate, inv.reroll);
+    let over = isGameOver(board, tray) && isGameOverWithItems(board, tray, inv.rotate, inv.reroll, inv.flip);
 
     /* A pending freeze force-melts at game over; the space it frees can
        rescue the game, so the fit test runs again afterwards. */
@@ -806,7 +855,7 @@ function initUI() {
       /* No history append: a force-melt only ever happens at game over, where
          the save is nulled anyway. The DOM phase may still build an ad hoc
          entry for the melt toast, but nothing is logged. */
-      over = isGameOverWithItems(board, tray, inv.rotate, inv.reroll);
+      over = isGameOverWithItems(board, tray, inv.rotate, inv.reroll, inv.flip);
     }
 
     /* ---- DOM phase ---- */
@@ -1451,11 +1500,15 @@ function initUI() {
   }
 
   /* ---- Items bar ---- */
-  const itemBtns = { rotate: $('itemRotate'), undo: $('itemUndo'), freeze: $('itemFreeze'), reroll: $('itemReroll') };
+  const itemBtns = { rotate: $('itemRotate'), flip: $('itemFlip'), undo: $('itemUndo'), freeze: $('itemFreeze'), reroll: $('itemReroll') };
   const ITEM_INFO = {
     rotate: {
       icon: '\u{1F504}', article: 'a', name: 'Rotate',
       text: 'Tap the little ⟳ arrow on a tray piece to spin it. One Rotate covers that piece until you place it, so spin away! You earn one for every 200 points. Spin it back to how it started and the Rotate hops right back into your pocket!',
+    },
+    flip: {
+      icon: '\u{2194}\u{FE0F}', article: 'a', name: 'Flip',
+      text: 'Tap the little ⇄ arrow on a tray piece to mirror it left-to-right. One Flip covers that piece until you place it. You earn one for every 300 points. Flip it back to how it started and the Flip hops right back into your pocket!',
     },
     undo: {
       icon: '↩️', article: 'an', name: 'Undo',
@@ -1475,12 +1528,14 @@ function initUI() {
     for (const k of Object.keys(itemBtns)) {
       const btn = itemBtns[k];
       const cnt = btn.querySelector('.cnt');
-      cnt.textContent = String(inv[k]);
-      cnt.hidden = inv[k] === 0;
-      btn.disabled = inv[k] === 0;
+      const n = inv[k] || 0; /* tutorial stashes may predate newer item keys */
+      cnt.textContent = String(n);
+      cnt.hidden = n === 0;
+      btn.disabled = n === 0;
     }
-    /* The bar icon spins while any piece still has free rotations */
+    /* The bar icons animate while any piece still has an open session */
     itemBtns.rotate.classList.toggle('spinning', tray.some((p) => p && p.rotFree));
+    itemBtns.flip.classList.toggle('mirroring', tray.some((p) => p && p.flipFree));
     /* When the tray is stuck, a held Reroll is a way out: pulse it. */
     itemBtns.reroll.classList.toggle('rescue',
       !tutorial && inv.reroll > 0 && isGameOver(board, tray));
@@ -1526,9 +1581,13 @@ function initUI() {
     showNextItemHelp();
   });
 
-  /* The bar's rotate button is inventory display; usage lives on the tray. */
+  /* The bar's rotate and flip buttons are inventory display; usage lives on
+     the tray. */
   itemBtns.rotate.addEventListener('click', () => {
     if (inv.rotate > 0) showToast('item-toast', '⟳ Tap the little arrow on a tray piece to rotate it');
+  });
+  itemBtns.flip.addEventListener('click', () => {
+    if (inv.flip > 0) showToast('item-toast', '⇄ Tap the little arrow on a tray piece to mirror it');
   });
 
   /* ---- Undo: one level, usable from play or from the game-over card.
@@ -1640,6 +1699,7 @@ function initUI() {
     tray[slot] = res.piece;
     showToast('item-toast', '\u{1F3B2} Fresh piece!');
     if (res.refundedRotate) showToast('item-toast', '\u{1F504} Rotate returned!');
+    if (res.refundedFlip) showToast('item-toast', '\u{2194}\u{FE0F} Flip returned!');
     if (res.refundedFreeze) showToast('item-toast', '❄️ Freeze returned!');
     sound.tap();
     renderTray();
@@ -1648,7 +1708,7 @@ function initUI() {
     if (tutorial) { tutAdvance(); return; }
     /* A last-hope reroll that fails ends the game right here, no placement
        needed: the swap was the escape hatch that kept the fit test alive. */
-    if (isGameOver(board, tray) && isGameOverWithItems(board, tray, inv.rotate, inv.reroll)) {
+    if (isGameOver(board, tray) && isGameOverWithItems(board, tray, inv.rotate, inv.reroll, inv.flip)) {
       endGameFromReroll();
     }
   }
@@ -1677,7 +1737,7 @@ function initUI() {
       updateItemsBar();
       announceEarned(melt.granted);
       maybeShowItemHelp(melt.granted);
-      if (!isGameOverWithItems(board, tray, inv.rotate, inv.reroll)) {
+      if (!isGameOverWithItems(board, tray, inv.rotate, inv.reroll, inv.flip)) {
         state = 'IDLE';
         persist();
         return;
@@ -1750,7 +1810,7 @@ function initUI() {
         board = emptyBoard();
         [3, 1, 4, 2, 3, 1].forEach((icon, c) => { board[4 * N + c] = icon; });
         board[5 * N + 6] = 2; /* blocks the unrotated drop */
-        inv = { rotate: 1, undo: 0, freeze: 0, reroll: 0 };
+        inv = { rotate: 1, flip: 0, undo: 0, freeze: 0, reroll: 0 };
         tray = [{ shapeId: 6, icon: 4 }, null, null];
       },
       anchor: () => slotEls[0],
@@ -1758,44 +1818,59 @@ function initUI() {
       allowDrop: (r, c) => r === 4 && c === 6,
     },
     {
-      /* 6 undo-a: a tempting star that finishes the row but spoils the flower
-         Perfect Match. The drop is forced so the lesson lands in step 6. */
+      /* 6 flip: the corner piece is backwards; only its mirror fills the gap.
+         allowPickup gates until the piece has actually been mirrored. */
+      text: '\u{2194}\u{FE0F} Flip! This piece is backwards. Tap the little ⇄ arrow to mirror it, then finish the row!',
+      setup() {
+        board = emptyBoard();
+        [2, 4, 1, 3, 2, 4, 1].forEach((icon, c) => { board[5 * N + c] = icon; });
+        board[4 * N + 7] = 3; /* blocks the unmirrored corner */
+        inv = { rotate: 0, flip: 1, undo: 0, freeze: 0, reroll: 0 };
+        tray = [{ shapeId: 9, icon: 2 }, null, null]; /* corner; its mirror is shape 12 */
+      },
+      anchor: () => slotEls[0],
+      allowPickup: (slot) => !!tray[slot] && tray[slot].shapeId === 12,
+      allowDrop: (r, c) => r === 4 && c === 7,
+    },
+    {
+      /* 7 undo-a: a tempting star that finishes the row but spoils the flower
+         Perfect Match. The drop is forced so the lesson lands next step. */
       text: 'This ⭐ finishes the row, but it spoils a flower Perfect Match. Drop it in anyway!',
       setup() {
         board = emptyBoard();
         for (let c = 0; c < 8; c++) board[4 * N + c] = 1; /* flowers cols 0-7 */
-        inv = { rotate: 0, undo: 1, freeze: 0, reroll: 0 };
+        inv = { rotate: 0, flip: 0, undo: 1, freeze: 0, reroll: 0 };
         tray = [{ shapeId: 0, icon: 3 }, null, null]; /* star single */
       },
       anchor: () => cellEls[4 * N + 8],
       allowDrop: (r, c) => r === 4 && c === 8,
     },
     {
-      /* 7 undo-b: the placed star already cleared the row; tapping Undo rewinds
+      /* 8 undo-b: the placed star already cleared the row; tapping Undo rewinds
          the whole move (the surviving snapshot brings the star back). */
       text: 'Regrets? Tap ↩️ Undo and the whole move rewinds!',
       setup() {
         board = emptyBoard();
-        inv = { rotate: 0, undo: 1, freeze: 0, reroll: 0 };
+        inv = { rotate: 0, flip: 0, undo: 1, freeze: 0, reroll: 0 };
         tray = [null, null, null];
       },
       anchor: () => $('itemUndo'),
     },
     {
-      /* 8 freeze-a: arm Freeze, then tap the piece to ice it (dipPiece advances).
+      /* 9 freeze-a: arm Freeze, then tap the piece to ice it (dipPiece advances).
          allowPickup false forces the button-first gesture. */
       text: '❄️ Freeze! Tap the ❄️ button, then tap your piece to coat it in ice.',
       setup() {
         board = emptyBoard();
         for (let c = 0; c < 8; c++) board[4 * N + c] = 1; /* flowers cols 0-7 */
-        inv = { rotate: 0, undo: 0, freeze: 1, reroll: 0 };
+        inv = { rotate: 0, flip: 0, undo: 0, freeze: 1, reroll: 0 };
         tray = [{ shapeId: 0, icon: 1 }, null, null]; /* flower single */
       },
       anchor: () => $('itemFreeze'),
       allowPickup: () => false,
     },
     {
-      /* 9 freeze-b: the pre-iced piece finishes the row but freezes it solid. */
+      /* 10 freeze-b: the pre-iced piece finishes the row but freezes it solid. */
       text: 'Now finish the row. Watch: it freezes solid instead of clearing!',
       setup() {
         board = emptyBoard();
@@ -1806,7 +1881,7 @@ function initUI() {
       allowDrop: (r, c) => r === 4 && c === 8,
     },
     {
-      /* 10 freeze-c: a real x2 melt. The frozen flower row waits; completing the
+      /* 11 freeze-c: a real x2 melt. The frozen flower row waits; completing the
          heart column melts both together as one big combo. */
       text: 'Finish another set and everything melts together: one big combo!',
       setup() {
@@ -1821,11 +1896,11 @@ function initUI() {
       allowDrop: (r, c) => r === 8 && c === 2,
     },
     {
-      /* 11 reroll: arm Reroll, then tap the piece to swap it (doReroll advances). */
+      /* 12 reroll: arm Reroll, then tap the piece to swap it (doReroll advances). */
       text: '\u{1F3B2} A piece you do not like? Tap \u{1F3B2} Reroll, then tap the piece to swap it!',
       setup() {
         board = emptyBoard();
-        inv = { rotate: 0, undo: 0, freeze: 0, reroll: 1 };
+        inv = { rotate: 0, flip: 0, undo: 0, freeze: 0, reroll: 1 };
         tray = [{ shapeId: 38, icon: 4 }, null, null]; /* Plus5 */
       },
       anchor: () => $('itemReroll'),
@@ -2210,6 +2285,34 @@ function initUI() {
     maybeOfferTutorial();
   }
 
+  /* Beta test panel: swap the live game for a hand-built scenario. Mirrors
+     resetGame's render/persist tail. Presets carry no frozen cells, streak,
+     or history, and never offer the tutorial. */
+  function applyScenario(id) {
+    if (state !== 'IDLE' || tutorial) return;
+    const s = buildScenario(id, rng);
+    if (!s) return;
+    board = s.board;
+    tray = s.tray;
+    score = s.score;
+    inv = s.inv;
+    progress = { pts: 0, flipPts: 0, combos: 0, fcombos: 0 };
+    frozen = new Uint8Array(CELL_COUNT);
+    freezeHold = false;
+    streak = 0;
+    scoreLog = [];
+    streakLog = [];
+    undoSnapshot = null;
+    setArming(false);
+    setRerollArming(false);
+    renderBoard();
+    renderTray();
+    updateItemsBar();
+    updateScoreDisplay(true);
+    updateStreakPill(false);
+    persist();
+  }
+
   $('playAgain').addEventListener('click', () => { sound.tap(); resolveNickPrompt(); resetGame(); });
   $('restartBtn').addEventListener('click', () => {
     if (state !== 'IDLE' || tutorial) return;
@@ -2279,6 +2382,33 @@ function initUI() {
     persist();
   });
   $('scoreHelpBtn').addEventListener('click', () => { sound.tap(); openScoreHelp(); });
+
+  /* "What's new": per-release summaries next to the version line, latest
+     first. Built fresh on every open; the overlay sits later in the DOM than
+     Settings, so it paints on top without hiding it (like the scoring sheet). */
+  $('whatsNewBtn').addEventListener('click', () => {
+    sound.tap();
+    const body = $('releaseNotesBody');
+    body.textContent = '';
+    for (const rel of RELEASE_NOTES) {
+      const h = document.createElement('h3');
+      h.textContent = rel.version + ' · ' + rel.date;
+      body.appendChild(h);
+      const ul = document.createElement('ul');
+      ul.className = 'notes-list';
+      for (const note of rel.notes) {
+        const li = document.createElement('li');
+        li.textContent = note;
+        ul.appendChild(li);
+      }
+      body.appendChild(ul);
+    }
+    $('releaseNotes').hidden = false;
+  });
+  $('releaseNotesClose').addEventListener('click', () => {
+    sound.tap();
+    $('releaseNotes').hidden = true;
+  });
 
   /* Reset all data: wipe both stores, then boot as a fresh install.
      Order matters: block re-writes first, then IDB (bounded wait, so a hung
@@ -2364,7 +2494,7 @@ function initUI() {
       if (tutorial) return; /* the tutorial never touches the real save */
       meta.best = best;
       meta.muted = sound.isMuted();
-      const over = state === 'GAME_OVER' || isGameOverWithItems(board, tray, inv.rotate, inv.reroll);
+      const over = state === 'GAME_OVER' || isGameOverWithItems(board, tray, inv.rotate, inv.reroll, inv.flip);
       const game = over ? null : encodeGame({ board, tray, score, inv, progress, frozen, freezeHold, streak, scoreLog, streakLog });
       storeBlob(SAVE_KEY, JSON.stringify({ v: 2, ...meta, game }));
     } catch (err) { /* storage may be unavailable; play on */ }
@@ -2374,9 +2504,9 @@ function initUI() {
     board = emptyBoard();
     score = 0;
     inv = BETA_STARTER_ITEMS
-      ? { rotate: 1, undo: 1, freeze: 1, reroll: 1 }
-      : { rotate: 0, undo: 0, freeze: 0, reroll: 0 };
-    progress = { pts: 0, combos: 0, fcombos: 0 };
+      ? { rotate: 1, flip: 1, undo: 1, freeze: 1, reroll: 1 }
+      : { rotate: 0, flip: 0, undo: 0, freeze: 0, reroll: 0 };
+    progress = { pts: 0, flipPts: 0, combos: 0, fcombos: 0 };
     frozen = new Uint8Array(CELL_COUNT);
     freezeHold = false;
     streak = 0;
@@ -2394,7 +2524,7 @@ function initUI() {
     meta = savedMeta;
     best = save.best;
     sound.setMuted(save.muted);
-    if (game && !isGameOverWithItems(game.board, game.tray, game.inv.rotate, game.inv.reroll)) {
+    if (game && !isGameOverWithItems(game.board, game.tray, game.inv.rotate, game.inv.reroll, game.inv.flip)) {
       board = game.board;
       tray = game.tray;
       score = game.score;
@@ -2460,6 +2590,109 @@ function initUI() {
 
   restore();
   mirrorAllToIdb(); /* re-sync the IDB backup with whatever localStorage holds */
+
+  /* ---- Beta test panel: scenario presets + generation overrides. Wired
+     after restore() so the persisted switches in meta.testTools can be
+     applied immediately. Production never enters this block, so the
+     pieces.js overrides stay inert there by construction. ---- */
+  if (IS_BETA) {
+    const testToolsEl = $('testTools');
+    const testToolsBtn = $('testToolsBtn');
+    const reroll1x1Toggle = $('reroll1x1Toggle');
+    testToolsBtn.hidden = false;
+
+    const scenarioList = $('testScenarioList');
+    for (const s of SCENARIOS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn-ghost';
+      b.textContent = s.label;
+      b.addEventListener('click', () => {
+        sound.tap();
+        testToolsEl.hidden = true;
+        applyScenario(s.id);
+      });
+      scenarioList.appendChild(b);
+    }
+
+    const buildChecks = (host, entries, key) => entries.map(({ idxVal, text }) => {
+      const label = document.createElement('label');
+      label.className = 'check-row';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.dataset[key] = String(idxVal);
+      label.append(box, document.createTextNode(' ' + text));
+      host.appendChild(label);
+      return box;
+    });
+    const classBoxes = buildChecks($('classFilterList'),
+      SHAPE_CLASS_META.map((m) => ({ idxVal: m.classIdx, text: m.name })), 'classIdx');
+    const iconBoxes = buildChecks($('iconFilterList'),
+      ICONS.map((icon, i) => ({ idxVal: i, text: icon })), 'iconIdx');
+
+    /* meta.testTools is the single source of truth; the pieces.js setters
+       are re-applied from it on every change and once here at boot. */
+    const applyGenOverrides = () => {
+      setRerollForce1x1(meta.testTools.reroll1x1);
+      setShapeClassFilter(meta.testTools.classes);
+      setIconFilter(meta.testTools.icons);
+    };
+    const syncTestToolsUI = () => {
+      reroll1x1Toggle.checked = meta.testTools.reroll1x1;
+      for (const box of classBoxes) {
+        box.checked = !meta.testTools.classes || meta.testTools.classes.includes(Number(box.dataset.classIdx));
+      }
+      for (const box of iconBoxes) {
+        box.checked = !meta.testTools.icons || meta.testTools.icons.includes(Number(box.dataset.iconIdx));
+      }
+    };
+    /* An all-or-none selection means "no filter" (stored as null), and the
+       boxes snap back to all checked so the panel never shows a dead state. */
+    const readFilter = (boxes, key) => {
+      const chosen = [];
+      for (const b of boxes) if (b.checked) chosen.push(Number(b.dataset[key]));
+      return (chosen.length === 0 || chosen.length === boxes.length) ? null : chosen;
+    };
+    const onFilterChange = () => {
+      meta.testTools.classes = readFilter(classBoxes, 'classIdx');
+      meta.testTools.icons = readFilter(iconBoxes, 'iconIdx');
+      applyGenOverrides();
+      syncTestToolsUI();
+      persist();
+    };
+    classBoxes.forEach((b) => b.addEventListener('change', onFilterChange));
+    iconBoxes.forEach((b) => b.addEventListener('change', onFilterChange));
+    reroll1x1Toggle.addEventListener('change', () => {
+      meta.testTools.reroll1x1 = reroll1x1Toggle.checked;
+      applyGenOverrides();
+      persist();
+    });
+    $('classFilterAll').addEventListener('click', () => {
+      sound.tap();
+      meta.testTools.classes = null;
+      meta.testTools.icons = null;
+      applyGenOverrides();
+      syncTestToolsUI();
+      persist();
+    });
+
+    /* Settings steps aside while the panel is up (same dance as the reset
+       confirm: both are overlays and DOM order decides who paints on top). */
+    testToolsBtn.addEventListener('click', () => {
+      sound.tap();
+      settingsEl.hidden = true;
+      syncTestToolsUI();
+      testToolsEl.hidden = false;
+    });
+    $('testToolsDone').addEventListener('click', () => {
+      sound.tap();
+      testToolsEl.hidden = true;
+      settingsEl.hidden = false;
+    });
+
+    applyGenOverrides();
+  }
+
   sound.setVolume(meta.volume);
   applyTheme();
   relayout();
