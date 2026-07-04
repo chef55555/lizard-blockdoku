@@ -18,9 +18,9 @@ const SAVE_KEY = IS_BETA ? 'lizard-blockdoku-beta' : 'lizard-blockdoku-v1';
 
 /* App version shown in Settings so a stale service worker is easy to spot.
    APP_BUILD must be bumped together with the sw.js CACHE version on every
-   deploy: they are numerically aligned (build 12 = cache v12). */
+   deploy: they are numerically aligned (build 13 = cache v13). */
 const APP_VERSION = 'v2.2';
-const APP_BUILD = 12;
+const APP_BUILD = 13;
 
 /* Global leaderboard endpoint (Lambda Function URL). Only enabled when the
    game is served from github.io: the API's CORS is pinned to that origin,
@@ -1807,7 +1807,7 @@ function initUI() {
      cells show their icon; the landing piece's cells get the dashed .land
      treatment (exactly like the help sheet's landing cells); cleared cells get
      the gold .ring. Assumes entry.board is a valid CELL_COUNT-char string. */
-  function buildMiniBoard(entry) {
+  function buildMiniBoard(entry, opts) {
     const placedSet = new Set(entry.placed || []);
     const clearedSet = new Set(entry.cleared || []);
     const grid = document.createElement('div');
@@ -1833,6 +1833,16 @@ function initUI() {
     }
     const wrap = document.createElement('div');
     wrap.className = 'bd-mini';
+    /* Panel-only: tapping the board pops it open full-screen (12px cells are
+       too small to inspect). The zoom copy is built without this flag so it is
+       not itself a nested button. */
+    if (opts && opts.zoom) {
+      wrap.classList.add('bd-mini-zoomable');
+      wrap.setAttribute('role', 'button');
+      wrap.tabIndex = 0;
+      wrap.setAttribute('aria-label', 'Show this board bigger');
+      wrap.addEventListener('click', () => { sound.tap(); openMiniZoom(entry); });
+    }
     wrap.appendChild(grid);
     return wrap;
   }
@@ -1845,7 +1855,7 @@ function initUI() {
   function buildBreakdown(entry, opts) {
     const box = document.createElement('div');
     if (opts && opts.board && typeof entry.board === 'string' && entry.board.length === CELL_COUNT) {
-      box.appendChild(buildMiniBoard(entry));
+      box.appendChild(buildMiniBoard(entry, { zoom: true }));
     }
     const row = (label, pts, cls) => {
       const r = document.createElement('div');
@@ -1964,6 +1974,23 @@ function initUI() {
   /* ---- History panels: the score and streak pills each open a sheet ---- */
   const scorePanelEl = $('scorePanel');
   const streakPanelEl = $('streakPanel');
+
+  /* Zoom overlay for a Recent-scores mini board. Reuses buildMiniBoard (built
+     without the zoom flag, so the enlarged copy is not itself a button) and
+     swaps in the .mini-zoom size variant, which fills most of the phone width.
+     Layers above the score panel; a tap anywhere on the dim backdrop closes it. */
+  const miniZoomEl = $('miniZoom');
+  function openMiniZoom(entry) {
+    const mount = $('miniZoomBoard');
+    mount.textContent = '';
+    const wrap = buildMiniBoard(entry);
+    const grid = wrap.querySelector('.mini');
+    if (grid) grid.classList.add('mini-zoom');
+    mount.appendChild(wrap);
+    $('miniZoomHead').textContent = '+' + entry.total;
+    miniZoomEl.hidden = false;
+  }
+  miniZoomEl.addEventListener('click', () => { sound.tap(); miniZoomEl.hidden = true; });
 
   function renderScorePanel() {
     const body = $('scorePanelBody');

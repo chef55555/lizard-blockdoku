@@ -636,6 +636,21 @@ check('score panel lists a breakdown ending in a total', (await page.locator('#s
     && (await entry.locator('.mini.mini-9 .mc').count()) === 81);
   check('mini board rings at least one cleared cell', (await entry.locator('.mini.mini-9 .mc.ring').count()) >= 1);
   check('mini board marks at least one landing cell', (await entry.locator('.mini.mini-9 .mc.land').count()) >= 1);
+  // Tap the mini board: it should blow up into the full-screen zoom overlay.
+  await entry.locator('.bd-mini').first().tap();
+  await page.waitForTimeout(150);
+  check('tapping a mini board opens the zoom overlay',
+    (await page.locator('#miniZoom:not([hidden])').count()) === 1);
+  check('zoom overlay renders the full 81-cell board',
+    (await page.locator('#miniZoom .mc').count()) === 81);
+  const zoomCellW = await page.locator('#miniZoom .mc').first().evaluate((el) => el.getBoundingClientRect().width);
+  check('zoom cells are enlarged (>=30px)', zoomCellW >= 30, zoomCellW.toFixed(1) + 'px');
+  check('zoom overlay shows a + total headline',
+    (await page.locator('#miniZoomHead').textContent()).includes('+'));
+  await page.tap('#miniZoom');
+  await page.waitForTimeout(150);
+  check('tapping the zoom overlay closes it',
+    (await page.locator('#miniZoom:not([hidden])').count()) === 0);
 }
 await page.tap('#scorePanelClose');
 await page.waitForTimeout(100);

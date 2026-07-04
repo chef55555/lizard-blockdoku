@@ -1254,3 +1254,26 @@ header { text-align: center; height: 56px; flex: none; }
   margin-top: 14px;
   opacity: 0.75;
 }
+
+/* ---- Zoomed mini board (tap a Recent-scores board to inspect it) ---- */
+
+/* The tappable board card in the panel. */
+.bd-mini-zoomable { cursor: pointer; }
+
+/* Full-screen zoom. Reuses the .overlay backdrop (dim + blur, both themes via
+   --overlay), but stacks above #scorePanel (.overlay is z-index 200, confetti
+   250) and stacks its headline over the board. */
+#miniZoom {
+  z-index: 260;
+  flex-direction: column;
+  gap: 14px;
+}
+.mini-zoom-pts { font-size: 30px; }
+
+/* Size variant: fill most of a phone's width. The .overlay's 24px padding each
+   side plus the grid's own gaps/padding/border (~17px) are covered by the 72px
+   inset so a 9x9 board never overflows a 390px screen; min() caps the cell on
+   wider screens. Icons scale off the same custom property so they stay legible.
+   The three-class selector outranks .mini.mini-9's 12px default. */
+.mini.mini-9.mini-zoom { --mini-cell: min(calc((100vw - 72px) / 9), 44px); }
+.mini.mini-9.mini-zoom .ic { font-size: calc(var(--mini-cell) * 0.72); }

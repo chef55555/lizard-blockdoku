@@ -246,6 +246,13 @@
     </div>
   </div>
 
+  <!-- Full-screen zoom of a Recent-scores mini board; filled by game.js and
+       closed by tapping anywhere. Layers above #scorePanel (see style.css). -->
+  <div id="miniZoom" class="overlay" hidden>
+    <div id="miniZoomHead" class="mini-pts mini-zoom-pts"></div>
+    <div id="miniZoomBoard"></div>
+  </div>
+
   <script src="game.js" defer></script>
   <script>
     /* Service worker registration lives in game.js; this is only a boot guard
