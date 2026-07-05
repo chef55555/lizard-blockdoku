@@ -583,6 +583,25 @@ check('freeze stock capped at 3', (await page.locator('#itemFreeze .cnt').textCo
 // The x3 combo pays one Reroll, and 3 flower units firing Matching Sets pays another.
 check('reroll stock from the x3 combo and Matching Sets', (await page.locator('#itemReroll .cnt').textContent()) === '2');
 
+console.log('7j-b. Butterfly perfect: full-screen rainbow wave');
+{
+  const board = new Array(81).fill(-1);
+  for (let c = 0; c < 8; c++) board[c] = 5; // row 0 cols 0-7 butterflies
+  await injectSave({
+    v: 2, best: 900,
+    game: {
+      board, tray: [{ shapeId: 0, icon: 5 }, { shapeId: 0, icon: 2 }, { shapeId: 0, icon: 3 }],
+      score: 0, inv: { rotate: 0, undo: 0, freeze: 0 }, progress: { pts: 0, combos: 0 },
+    },
+  });
+}
+await dragPiece(0, 0, 8); // butterfly single completes a perfect row
+await page.waitForTimeout(300);
+check('butterfly perfect flies as butterfly flourishes', (await page.locator('#perfectLayer .pfx-butterfly').count()) > 0);
+check('butterfly perfect sends a rainbow wave', (await page.locator('.rainbow-wave').count()) >= 1);
+// clear any first-earn cards this haul produced so later tests are not blocked
+for (let i = 0; i < 6 && (await page.locator('#itemHelp:not([hidden])').count()); i++) { await page.tap('#itemHelpOk'); await page.waitForTimeout(120); }
+
 console.log('7j2. Streak: back-to-back clears pay a rising bonus');
 // Rows 0 and 1 (cols 0-7) with mixed icons so no single icon reaches 3 in a
 // row (zero icon bonuses). Tray: three Single lizards. Each single completes

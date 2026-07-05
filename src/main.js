@@ -1189,6 +1189,8 @@ function initUI() {
       }
     });
     perfectLayer.appendChild(frag);
+    /* A butterfly Perfect Match also sends a rainbow wave across the whole screen. */
+    if (perfects.slice(0, PERFECT_UNIT_CAP).some((b) => b.icon === 5)) spawnRainbowWave();
     /* Safety sweep in case an animationend never fires (backgrounded tab, etc.). */
     setTimeout(() => {
       perfectLayer.querySelectorAll('.pfx').forEach((el) => el.remove());
@@ -1212,8 +1214,11 @@ function initUI() {
     if (icon === 0) {
       /* Lizard: scurry across the whole viewport and off the near edge. */
       const right = rng() < 0.5;
+      const dx = (right ? (vw - x + 80) : -(x + 80)) | 0;
       el.classList.add('pfx-lizard');
-      el.style.setProperty('--dx', ((right ? (vw - x + 80) : -(x + 80)) | 0) + 'px');
+      if (!right) el.classList.add('go-left');
+      el.style.setProperty('--dx', dx + 'px');
+      el.style.setProperty('--trail', Math.abs(dx) + 'px'); /* length of the rainbow track it leaves */
       el.style.setProperty('--dy', ((rng() * 120 - 60) | 0) + 'px');
       el.style.setProperty('--face', (right ? 90 : -90) + 'deg');
       el.style.setProperty('--dur', ((1400 + rng() * 800) | 0) + 'ms');
@@ -1225,6 +1230,7 @@ function initUI() {
       const fromLeft = gust > 0;
       const along = fromLeft ? x : (vw - x);
       el.classList.add('pfx-flower');
+      if (!fromLeft) el.classList.add('wind-left'); /* flip the rainbow gust streak */
       el.style.setProperty('--dx', (gust | 0) + 'px');
       el.style.setProperty('--dur', ((1500 + rng() * 600) | 0) + 'ms');
       el.style.setProperty('--delay', ((base + (along / vw) * 350) | 0) + 'ms');
@@ -1246,10 +1252,15 @@ function initUI() {
       el.style.setProperty('--dur', ((900 + rng() * 100) | 0) + 'ms');
       el.style.setProperty('--delay', ((base + k * 20) | 0) + 'ms');
     } else if (icon === 4) {
-      /* Strawberry: eaten in place, bite by bite, in a wave across the unit. */
+      /* Strawberry: bursts apart in a rainbow flash. */
+      const ang = rng() * Math.PI * 2;
+      const dist = cellPx * (1.2 + rng() * 1.2);
       el.classList.add('pfx-berry');
-      el.style.setProperty('--delay', ((base + k * 90) | 0) + 'ms');
-      inner = document.createElement('span');
+      el.style.setProperty('--bx', ((Math.cos(ang) * dist) | 0) + 'px');
+      el.style.setProperty('--by', ((Math.sin(ang) * dist) | 0) + 'px');
+      el.style.setProperty('--spin', ((rng() * 720 - 360) | 0) + 'deg');
+      el.style.setProperty('--dur', ((850 + rng() * 200) | 0) + 'ms');
+      el.style.setProperty('--delay', ((base + k * 45) | 0) + 'ms');
     } else {
       /* Butterfly: zigzag up and away off the top, wings flapping. */
       const dir = rng() < 0.5 ? -1 : 1;
@@ -1271,6 +1282,16 @@ function initUI() {
     }
     el.addEventListener('animationend', (e) => { if (e.target === el) el.remove(); });
     return el;
+  }
+
+  /* Full-screen rainbow wave for a butterfly Perfect Match. Only reached from
+     perfectFx (tier 2+, never under reduced motion), so it needs no extra gate. */
+  function spawnRainbowWave() {
+    const wave = document.createElement('div');
+    wave.className = 'rainbow-wave';
+    perfectLayer.appendChild(wave);
+    wave.addEventListener('animationend', () => wave.remove());
+    setTimeout(() => { wave.remove(); }, 1800);
   }
 
   function spawnParticles(union) {
