@@ -903,9 +903,17 @@ await page.tap('#confirmYes');
 await page.waitForTimeout(200);
 check('the offer never repeats', (await page.locator('#tutOffer:not([hidden])').count()) === 0);
 
-console.log('7m. Leaderboard: submit and panel against a mocked API');
+console.log('7m. Leaderboard: per-game submit and period tabs against a mocked API');
 let submitBody = null;
 let submitCount = 0;
+const topHits = {}; // period name -> number of /top fetches, proving tabs refetch
+// Distinct leader per period so switching tabs is observable; the all-time
+// leader carries a hostile name to prove the panel renders it inert.
+const leaders = {
+  all: { name: 'Ada<script>alert(1)</script>', score: 5000 },
+  week: { name: 'Bea', score: 900 },
+  day: { name: 'Cy', score: 300 },
+};
 await page.route('https://lb.test/**', async (route) => {
   const req = route.request();
   // Fulfilled cross-origin responses still face CORS checks in the browser.
@@ -915,14 +923,18 @@ await page.route('https://lb.test/**', async (route) => {
     'access-control-allow-headers': 'content-type',
   };
   if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
-  if (req.url().endsWith('/submit') && req.method() === 'POST') {
+  if (req.url().includes('/submit') && req.method() === 'POST') {
     submitBody = req.postDataJSON();
     submitCount++;
+    // best is always the all-time value (mock treats the first score as it).
     return route.fulfill({ headers: cors, json: { accepted: true, best: submitBody.score } });
   }
-  if (req.url().endsWith('/top')) {
+  if (req.url().includes('/top')) {
+    const period = new URL(req.url()).searchParams.get('period') || 'all';
+    topHits[period] = (topHits[period] || 0) + 1;
+    const leader = leaders[period] || leaders.all;
     return route.fulfill({ headers: cors, json: { scores: [
-      { id: 'friend-1', name: 'Tom<script>alert(1)</script>', score: 5000, when: 1 },
+      { id: 'friend-' + period, name: leader.name, score: leader.score, when: 1 },
       { id: (submitBody && submitBody.playerId) || 'nobody', name: 'Lizard', score: 101, when: 2 },
     ] } });
   }
@@ -944,8 +956,9 @@ check('tapping the best pill opens the leaderboard', (await page.locator('#lbPan
 await page.tap('#lbClose');
 await page.waitForTimeout(100);
 
-// Opening the leaderboard above already submitted the current best (5); clear
-// that so the next check isolates whether GAME OVER itself submits.
+// Submission is now per FINISHED game, so merely opening the board submits
+// nothing (there is no ended game yet). Reset the capture defensively so the
+// next check isolates whether GAME OVER itself submits.
 submitBody = null;
 await dragPiece(0, 0, 0);
 await page.waitForSelector('#gameOver.show', { timeout: 5000 });
@@ -970,10 +983,32 @@ check('acceptance advances bestSubmitted',
   (await page.evaluate(() => JSON.parse(localStorage.getItem('lizard-blockdoku-lb')).bestSubmitted)) === 101);
 await page.tap('#lbGameOver');
 await page.waitForTimeout(500);
+check('leaderboard shows three period tabs', (await page.locator('.lb-tab').count()) === 3);
+check('all-time is the default active tab',
+  (await page.locator('.lb-tab[data-period="all"]').getAttribute('aria-pressed')) === 'true');
 check('leaderboard panel opens with rows', (await page.locator('.lb-row').count()) === 2);
 check('own row is highlighted', (await page.locator('.lb-row.me .lb-name').textContent()) === 'Lizard');
 check('hostile names render inert', (await page.locator('#lbBody script').count()) === 0
-  && (await page.locator('#lbBody').textContent()).includes('Tom<script>'));
+  && (await page.locator('#lbBody').textContent()).includes('Ada<script>'));
+
+// Switch to This week: the tab activates, refetches that period, shows its rows.
+await page.tap('.lb-tab[data-period="week"]');
+await page.waitForTimeout(400);
+check('tapping This week activates that tab and deactivates all-time',
+  (await page.locator('.lb-tab[data-period="week"]').getAttribute('aria-pressed')) === 'true'
+  && (await page.locator('.lb-tab[data-period="all"]').getAttribute('aria-pressed')) === 'false');
+check('This week refetched its own period', (topHits.week || 0) >= 1);
+check('This week shows its rows', (await page.locator('.lb-row').count()) === 2
+  && (await page.locator('#lbBody').textContent()).includes('Bea'));
+check('own row still highlighted after switching period',
+  (await page.locator('.lb-row.me .lb-name').textContent()) === 'Lizard');
+
+// Switch to Today: same contract, its own distinct rows.
+await page.tap('.lb-tab[data-period="day"]');
+await page.waitForTimeout(400);
+check('tapping Today refetches and shows its rows', (topHits.day || 0) >= 1
+  && (await page.locator('#lbBody').textContent()).includes('Cy'));
+
 await page.tap('#lbClose');
 const countBefore = submitCount;
 await page.tap('#playAgain');

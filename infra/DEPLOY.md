@@ -4,6 +4,8 @@ Everything needed to stand up the Lizard Block Mania leaderboard on AWS
 from any computer. The code is already in this repo:
 
 - `backend/index.mjs`: the Lambda handler (GET /top, POST /submit)
+- `backend/periods.mjs`: pure UTC period-key helpers (all-time / day / week),
+  imported by `index.mjs`. It MUST be zipped alongside the handler (see step 3)
 - `infra/template.yml`: CloudFormation for the table, role, function, and Function URL
 - `infra/budget.json` + `infra/budget-notifications.json`: $1/month billing tripwire
 - `src/logic/config.js`: `LEADERBOARD_URL` holds the live Function URL,
@@ -42,14 +44,17 @@ aws cloudformation deploy --stack-name lizard-leaderboard --template-file infra/
 ## 3. Push the real Lambda code
 
 The template only holds a placeholder; the real handler is pushed after
-every stack deploy. PowerShell:
+every stack deploy. The package now includes BOTH modules: `index.mjs` and
+`periods.mjs` (the handler imports `./periods.mjs`, so a zip missing it fails
+at cold start with a module-not-found error). Both files must sit at the root
+of the zip. PowerShell:
 
 ```powershell
-Compress-Archive -Path backend\index.mjs -DestinationPath backend\fn.zip -Force
+Compress-Archive -Path backend\index.mjs, backend\periods.mjs -DestinationPath backend\fn.zip -Force
 aws lambda update-function-code --function-name lizard-leaderboard --zip-file fileb://backend/fn.zip
 ```
 
-bash equivalent: `cd backend && zip fn.zip index.mjs && aws lambda update-function-code --function-name lizard-leaderboard --zip-file fileb://fn.zip`
+bash equivalent: `cd backend && zip fn.zip index.mjs periods.mjs && aws lambda update-function-code --function-name lizard-leaderboard --zip-file fileb://fn.zip`
 
 Do not commit `fn.zip`.
 
@@ -90,10 +95,40 @@ try { Invoke-RestMethod -Method Post -Uri "$U/submit" -ContentType 'application/
 curl.exe -s -i -X OPTIONS "$U/submit" -H "Origin: https://chef55555.github.io" -H "Access-Control-Request-Method: POST" | Select-String "access-control"
 ```
 
-Clean up the test row afterwards (optional):
+### Period tabs (daily / weekly / all-time)
+
+A single `/submit` writes THREE rows (all-time, this UTC day, this ISO week),
+so one submitted score must appear on all three boards. Reusing `$U` and the
+same `$body` from above (score 150):
+
+```powershell
+# Submit once more to be sure the three period rows exist.
+Invoke-RestMethod -Method Post -Uri "$U/submit" -ContentType 'application/json' -Body $body
+
+# The same score shows up on every board.
+Invoke-RestMethod "$U/top?period=all"   # expect the score in the all-time list
+Invoke-RestMethod "$U/top?period=week"  # expect it in this week's list
+Invoke-RestMethod "$U/top?period=day"   # expect it in today's list
+
+# No period, or a bogus one, falls back to all-time (never an empty error).
+Invoke-RestMethod "$U/top"              # same as ?period=all
+Invoke-RestMethod "$U/top?period=xyz"   # same as ?period=all
+
+# The id in each row is the raw playerId (no period suffix), so the client can
+# still highlight the player's own row:
+(Invoke-RestMethod "$U/top?period=day").scores[0].id  # a bare UUID
+```
+
+Note on expiry: the daily row carries a TTL ~2 days out and the weekly row
+~8 days out, so tomorrow's `?period=day` will not list today's row once
+DynamoDB sweeps it (TTL deletion can lag hours, which is fine). The all-time
+row has no TTL and never expires.
+
+Clean up the test rows afterwards (optional). The all-time row has a stable
+key; the day/week rows self-expire, so you can just let them age out:
 
 ```
-aws dynamodb delete-item --table-name lizard-leaderboard --key "{\"pk\":{\"S\":\"P#11111111-2222-3333-4444-555555555555\"}}"
+aws dynamodb delete-item --table-name lizard-leaderboard --key "{\"pk\":{\"S\":\"P#11111111-2222-3333-4444-555555555555#ALL\"}}"
 ```
 
 ## 6. Billing tripwire
@@ -137,15 +172,43 @@ budgets on an account are free. Alerts email thomas.sheffer@gmail.com at
 
 ## Design notes (for future maintenance)
 
-- One DynamoDB row per player (`pk = P#<uuid>`), so the board dedupes itself.
-- First submit pins `secretHash` (sha256 of the client secret); later updates
-  require the same secret, a strictly higher score, and a 10s gap, enforced in
-  a single conditional UpdateItem.
+- Data model: one DynamoDB row per (player, period). `pk = P#<uuid>#<periodKey>`
+  and the row's `lb` attribute IS that period key, so the existing sparse GSI
+  `top` (partition `lb`, sort `score`) serves each board with one descending
+  Query. Period keys are computed by `backend/periods.mjs` on the SERVER clock,
+  in UTC, never from client input:
+  - all-time: `ALL`
+  - day: `D#YYYY-MM-DD`
+  - week: `W#GGGG-Www` (ISO-8601 week date; the ISO week-year GGGG can differ
+    from the calendar year around Jan 1 / Dec 31)
+- Each `/submit` upserts the all/day/week rows together, keeping the MAX score
+  per period. First write for a period pins `secretHash` (sha256 of the client
+  secret); later writes need the same secret AND a strictly higher score for
+  that period (per period, so a fresh daily row is never blocked by a bigger
+  all-time score). The all-time row governs the response `{accepted, best}` and
+  ownership: a wrong secret is rejected before any day/week write.
+- TTL: day rows expire ~2 days out, week rows ~8 days out (attribute `ttl`,
+  swept by DynamoDB). The all-time row has no TTL.
+- `/top?period=all|day|week` (default `all`, unknown falls back to `all`) maps
+  the name to a key and queries the GSI. Returned `id` is the raw playerId
+  (period suffix stripped) so the client can still highlight its own row.
 - Rate limiting: 30 POSTs per IP per hour via counter rows with DynamoDB TTL.
+  The old per-player 10s update gap was dropped (per-game submits on every game
+  over are legitimate and a lower daily-best must not be blocked); the IP rate
+  limit is the remaining abuse guard.
 - Anti-cheat is plausibility-only (score cap 100000) by design: accepted risk
   for a friends-only board.
 - CORS lives entirely on the Function URL config in the template; the Lambda
   code never sets CORS headers.
-- The client identity lives in localStorage key `lizard-blockdoku-lb`
-  (playerId, secret, bestSubmitted). Clearing it mints a new identity and
-  the old row becomes orphaned but harmless.
+- The client submits each FINISHED game's score (not a lifetime best); the
+  server keeps the per-period max. The client identity lives in localStorage
+  key `lizard-blockdoku-lb` (playerId, secret, bestSubmitted). `bestSubmitted`
+  is now just an informational mirror of the highest confirmed submit; the
+  submit dedupe guard is an in-memory session high-water, so a new session's
+  first game always reaches today's board even when it is below the lifetime
+  best. Clearing the key mints a new identity; old rows orphan harmlessly.
+- Migration on first deploy of this version: the previous model stored one row
+  per player with `lb = "LB"`. New reads query `lb = "ALL"`, so pre-existing
+  all-time entries drop off the board until each player submits again (which
+  creates their `#ALL` row). The stale `LB` rows have no TTL; delete them by
+  hand if you want a clean table, otherwise they sit invisible and harmless.

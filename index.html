@@ -224,6 +224,11 @@
   <div id="lbPanel" class="overlay" hidden>
     <div class="card sheet">
       <h2>&#x1F3C6; Leaderboard</h2>
+      <div class="seg lb-tabs" id="lbTabs" role="group" aria-label="Leaderboard period">
+        <button type="button" class="lb-tab" data-period="all" aria-pressed="true">All-time</button>
+        <button type="button" class="lb-tab" data-period="week" aria-pressed="false">This week</button>
+        <button type="button" class="lb-tab" data-period="day" aria-pressed="false">Today</button>
+      </div>
       <div id="lbBody" class="help-body"></div>
       <button id="lbClose" type="button" class="btn-main">Close</button>
     </div>

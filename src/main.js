@@ -2188,6 +2188,16 @@ function initUI() {
      Beta deployments may view the board but never submit to it
      (BETA_LB_SUBMITS is the testing escape hatch). ---- */
   const lb = (() => {
+    /* The server keeps the max per period (day/week/all-time), so the client
+       submits each FINISHED game's actual score, not a lifetime best. Both
+       trackers are in-memory (this page-load only): sentHigh dedupes redundant
+       submits, and it deliberately does NOT persist, so the first game of a
+       fresh session always reaches today's board even when it is below the
+       lifetime best. pending is the finished-game score still awaiting a
+       successful send, kept so offline retries have something to resend. */
+    let sentHigh = 0;
+    let pending = 0;
+
     function identity() {
       try {
         const raw = JSON.parse(localStorage.getItem(LB_KEY));
@@ -2218,12 +2228,16 @@ function initUI() {
       }
     }
 
-    /* bestSubmitted only advances when the server answers, so any failure
-       retries at the next game over, panel open, or reconnect. */
-    async function submitBest() {
+    /* Submit a finished game's score (pass it as s), or call with no argument
+       to retry the last unsent score. sentHigh only advances when the server
+       answers, so any failure retries at the next game over, panel open, or
+       reconnect. */
+    async function submitScore(s) {
       if (!LEADERBOARD_URL || (IS_BETA && !BETA_LB_SUBMITS)) return;
+      if (typeof s === 'number' && Number.isFinite(s)) pending = Math.max(pending, s);
+      const value = pending;
+      if (value < 1 || value <= sentHigh) return; /* nothing new to send this session */
       const idn = identity();
-      if (best <= (idn.bestSubmitted || 0)) return;
       try {
         const out = await call('/submit', {
           method: 'POST',
@@ -2232,36 +2246,40 @@ function initUI() {
             playerId: idn.playerId,
             secret: idn.secret,
             name: meta.nickname || PLAYER_NAME,
-            score: best,
+            score: value,
           }),
         });
         if (out && (out.accepted === true || out.accepted === false)) {
-          idn.bestSubmitted = Math.max(best, out.best || 0);
+          sentHigh = Math.max(sentHigh, value);
+          idn.bestSubmitted = Math.max(idn.bestSubmitted || 0, out.best || value);
           saveIdentity(idn);
         }
-      } catch (err) { /* offline or slow; try again later */ }
+      } catch (err) { /* offline or slow; the score stays pending for a retry */ }
     }
 
-    async function fetchTop() {
-      const out = await call('/top', { method: 'GET' });
+    async function fetchTop(period) {
+      const p = period || 'all';
+      const out = await call('/top?period=' + encodeURIComponent(p), { method: 'GET' });
       if (!out || !Array.isArray(out.scores)) throw new Error('bad payload');
       const scores = out.scores.slice(0, 50);
-      storeBlob(LB_KEY + '-cache', JSON.stringify(scores));
+      storeBlob(LB_KEY + '-cache-' + p, JSON.stringify(scores));
       return scores;
     }
 
-    function cachedTop() {
+    function cachedTop(period) {
       try {
-        const raw = JSON.parse(localStorage.getItem(LB_KEY + '-cache'));
+        const raw = JSON.parse(localStorage.getItem(LB_KEY + '-cache-' + (period || 'all')));
         return Array.isArray(raw) ? raw : null;
       } catch (err) { return null; }
     }
 
-    return { identity, submitBest, fetchTop, cachedTop };
+    return { identity, submitScore, fetchTop, cachedTop };
   })();
 
   const lbPanelEl = $('lbPanel');
   const lbBodyEl = $('lbBody');
+  const lbTabEls = Array.from(document.querySelectorAll('.lb-tab'));
+  let lbPeriod = 'all'; /* the active leaderboard tab */
 
   /* Names come from strangers on the internet: textContent only, always. */
   function renderLb(scores, statusText) {
@@ -2299,17 +2317,33 @@ function initUI() {
     });
   }
 
-  async function openLeaderboard() {
-    lbPanelEl.hidden = false;
-    const cached = lb.cachedTop();
+  /* Show one period: its cached scores instantly, then a fresh fetch. The
+     period guard drops a slow response for a tab the user has since left. */
+  function showPeriod(period) {
+    lbPeriod = period;
+    lbTabEls.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.period === period)));
+    const cached = lb.cachedTop(period);
     renderLb(cached, cached ? 'Refreshing...' : 'Loading...');
-    if (!nickPending) lb.submitBest(); /* natural retry point for an unsent best */
-    try {
-      renderLb(await lb.fetchTop());
-    } catch (err) {
-      renderLb(cached, cached ? 'Offline: showing the last scores' : 'Could not reach the leaderboard');
-    }
+    lb.fetchTop(period).then((scores) => {
+      if (lbPeriod === period) renderLb(scores);
+    }).catch(() => {
+      if (lbPeriod === period) {
+        renderLb(cached, cached ? 'Offline: showing the last scores' : 'Could not reach the leaderboard');
+      }
+    });
   }
+
+  function openLeaderboard() {
+    lbPanelEl.hidden = false;
+    if (!nickPending) lb.submitScore(); /* natural retry point for an unsent score */
+    showPeriod('all'); /* always reopen on the all-time tab */
+  }
+
+  lbTabEls.forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.period === lbPeriod) return;
+    sound.tap();
+    showPeriod(b.dataset.period);
+  }));
 
   if (LEADERBOARD_URL) {
     $('lbBtn').hidden = false;
@@ -2327,7 +2361,7 @@ function initUI() {
     sound.tap();
     openLeaderboard();
   });
-  window.addEventListener('online', () => { if (!nickPending) lb.submitBest(); });
+  window.addEventListener('online', () => { if (!nickPending) lb.submitScore(); });
 
   /* The score pill opens a log of recent breakdowns; the streak pill opens the
      live streak (it only takes taps while lit, via pointer-events in CSS). */
@@ -2365,7 +2399,7 @@ function initUI() {
       persist();
     }
     $('nickPrompt').hidden = true;
-    lb.submitBest();
+    lb.submitScore(score);
   }
 
   $('nickPromptSave').addEventListener('click', () => { sound.tap(); resolveNickPrompt(); });
@@ -2400,7 +2434,7 @@ function initUI() {
       persist();
     } else {
       nickEl.hidden = true;
-      lb.submitBest();
+      lb.submitScore(score);
     }
     gameOverEl.hidden = false;
     void gameOverEl.offsetWidth; /* flush styles so the card entrance transition plays */

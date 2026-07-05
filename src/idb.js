@@ -46,7 +46,8 @@ const idb = (() => {
   };
 })();
 
-const MIRROR_KEYS = [SAVE_KEY, LB_KEY, LB_KEY + '-cache'];
+const MIRROR_KEYS = [SAVE_KEY, LB_KEY,
+  LB_KEY + '-cache-all', LB_KEY + '-cache-week', LB_KEY + '-cache-day'];
 
 /* Boot fallback: fill any localStorage gap from the IDB backup. */
 async function preloadFromIdb() {

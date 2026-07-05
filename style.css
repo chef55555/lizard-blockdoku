@@ -1418,6 +1418,16 @@ header { text-align: center; height: 56px; flex: none; }
 
 /* ---- Leaderboard ---- */
 
+/* Period tabs reuse the Settings segmented control (.seg); give the strip a
+   little breathing room and let the three buttons share the width evenly. */
+.lb-tabs {
+  margin: 4px 0 12px;
+}
+.lb-tabs .lb-tab {
+  flex: 1;
+  white-space: nowrap;
+}
+
 .lb-status {
   font-size: 13px;
   color: var(--text-soft);
