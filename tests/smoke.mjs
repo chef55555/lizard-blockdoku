@@ -1,6 +1,6 @@
 // End-to-end smoke test: drives the real game in Chrome with a phone-sized
 // viewport. Run with the local server up: node tests/smoke.mjs
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
 const BASE = 'http://localhost:8080';
@@ -17,7 +17,13 @@ function check(name, ok, extra) {
   }
 }
 
-const browser = await chromium.launch({ channel: 'chrome', headless: true });
+/* Default drives real Chrome; BROWSER=webkit drives Safari's engine (WebKit),
+   the only way to catch the Safari-only drag/placement issues Chrome hides. */
+const ENGINE = process.env.BROWSER || 'chrome';
+console.log('engine: ' + ENGINE);
+const browser = ENGINE === 'webkit'
+  ? await webkit.launch({ headless: true })
+  : await chromium.launch({ channel: 'chrome', headless: true });
 const context = await browser.newContext({
   viewport: { width: 390, height: 844 },
   deviceScaleFactor: 3,
@@ -215,11 +221,18 @@ check('best kept after reset', (await page.locator('#bestVal').textContent()) ==
 console.log('6. Service worker: offline reload');
 await page.evaluate(() => navigator.serviceWorker.ready);
 await page.waitForTimeout(800); // let precache finish
-await context.setOffline(true);
-await page.reload();
-const offlineCells = await page.locator('.cell').count().catch(() => 0);
-check('offline reload renders the game', offlineCells === 81, 'cells=' + offlineCells);
-await context.setOffline(false);
+if (ENGINE === 'webkit') {
+  /* Playwright's WebKit errors on offline navigation, so reload online (keeps
+     the flow: splash reappears) and skip the offline-specific assertion. */
+  await page.reload();
+  console.log('  (offline reload assertion skipped under webkit)');
+} else {
+  await context.setOffline(true);
+  await page.reload();
+  const offlineCells = await page.locator('.cell').count().catch(() => 0);
+  check('offline reload renders the game', offlineCells === 81, 'cells=' + offlineCells);
+  await context.setOffline(false);
+}
 
 console.log('7. Restart flow');
 await dismissSplash();

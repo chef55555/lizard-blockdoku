@@ -677,6 +677,14 @@ function initUI() {
     if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 10) {
       drag.moved = true;
     }
+    /* Resolve the drop cell HERE, synchronously with the pointer, not only in
+       the rAF ghost loop. Safari can throttle requestAnimationFrame, and iOS
+       shifts the board mid-drag when the address bar hides, so a rAF-driven
+       anchor can be stale at release: pieces land in the wrong cell, or fail
+       to place at all. Re-reading the board rect each move also keeps the
+       mapping correct while the viewport moves. */
+    drag.boardRect = boardEl.getBoundingClientRect();
+    updateTarget();
   }
 
   function onPointerUp(e) {
