@@ -1858,6 +1858,94 @@ test('deploy: every src module is in sw.js ASSETS and the cache matches the buil
   assert.strictEqual(cacheVer, G.APP_BUILD, 'sw.js CACHE version must equal APP_BUILD');
 });
 
+/* ---- Difficulty presets ---- */
+
+test('difficulty: config table shape and Easy = today identity', () => {
+  assert.deepStrictEqual(G.DIFFICULTY_IDS, ['easy', 'normal', 'hard']);
+  assert.strictEqual(G.DIFFICULTY.easy.weightMul, null, 'Easy applies no bias');
+  for (const id of ['normal', 'hard']) {
+    assert.ok(Array.isArray(G.DIFFICULTY[id].weightMul), id + ' has a bias array');
+    assert.strictEqual(G.DIFFICULTY[id].weightMul.length, G.SHAPE_CLASSES.length);
+  }
+  const e = G.DIFFICULTY.easy;
+  assert.strictEqual(e.mercy, 20);
+  assert.strictEqual(e.starter, 0);
+  assert.strictEqual(e.itemRate, 1);
+  assert.strictEqual(e.rescues, true);
+});
+
+test('difficulty: accessors follow setActiveDifficulty, unknown is ignored', () => {
+  try {
+    G.setActiveDifficulty('hard');
+    assert.strictEqual(G.currentDifficulty(), 'hard');
+    assert.strictEqual(G.mercyAttempts(), 4);
+    assert.strictEqual(G.itemRateMul(), 0.5);
+    assert.strictEqual(G.rescuesEnabled(), false);
+    G.setActiveDifficulty('bogus');
+    assert.strictEqual(G.currentDifficulty(), 'hard', 'a bad id is ignored');
+    G.setActiveDifficulty('easy');
+    assert.strictEqual(G.mercyAttempts(), 20);
+    assert.strictEqual(G.itemRateMul(), 1);
+    assert.strictEqual(G.rescuesEnabled(), true);
+  } finally {
+    G.setActiveDifficulty('easy');
+    G.setDifficultyWeights(null);
+  }
+});
+
+test('difficulty: Easy bias is byte-for-byte the baseline, Hard leans big', () => {
+  const BIG = new Set([11, 12, 13, 14, 15]);
+  function bigFraction(mul) {
+    const rng = mulberry32(4242);
+    G.setDifficultyWeights(mul);
+    let big = 0;
+    const N = 4000;
+    for (let i = 0; i < N; i++) if (BIG.has(G.SHAPE_CLASS_OF[G.pickShapeId(rng)])) big++;
+    return big / N;
+  }
+  try {
+    const base = bigFraction(null);
+    const easyFrac = bigFraction(G.DIFFICULTY.easy.weightMul); /* null */
+    const hardFrac = bigFraction(G.DIFFICULTY.hard.weightMul);
+    assert.ok(Math.abs(easyFrac - base) < 1e-9, 'Easy (null bias) matches baseline exactly');
+    assert.ok(hardFrac > base + 0.05, 'Hard yields more big pieces (' + hardFrac.toFixed(3) + ' vs ' + base.toFixed(3) + ')');
+  } finally {
+    G.setDifficultyWeights(null);
+  }
+});
+
+test('genTray honors the attempts parameter and always returns 3 pieces', () => {
+  const rng = mulberry32(5);
+  const full = G.emptyBoard(); full.fill(1);
+  assert.strictEqual(G.genTray(full, rng, 1).length, 3, 'terminates with attempts=1 on a jammed board');
+  const t2 = G.genTray(G.emptyBoard(), rng, 40);
+  assert.strictEqual(t2.length, 3);
+});
+
+test('computeEarned: rateMul scales accrual; default and 1 are the historic path', () => {
+  const turn = { gained: 400, comboN: 0, perfectCount: 0 };
+  assert.strictEqual(G.computeEarned({ pts: 0, combos: 0 }, turn).earned.rotate, 2, 'no arg = full rate');
+  assert.strictEqual(G.computeEarned({ pts: 0, combos: 0 }, turn, 1).earned.rotate, 2);
+  const half = G.computeEarned({ pts: 0, combos: 0 }, { gained: 400, comboN: 0, perfectCount: 0 }, 0.5);
+  assert.strictEqual(half.earned.rotate, 1, '0.5 rate: 400 -> 200 pts -> one rotate');
+  assert.strictEqual(half.progress.pts, 0, 'pts stays an integer after scaling');
+});
+
+test('isGameOverWithItems: rescues=false ignores the item escape hatch', () => {
+  const full = G.emptyBoard(); full.fill(1);
+  const tray = [{ shapeId: 0, icon: 1 }, null, null]; /* a Single that cannot fit a full board */
+  assert.strictEqual(G.isGameOverWithItems(full, tray, 0, 1, 0, true), false, 'a held Reroll is a way out');
+  assert.strictEqual(G.isGameOverWithItems(full, tray, 0, 1, 0, false), true, 'Hard ends the game anyway');
+  assert.strictEqual(G.isGameOverWithItems(full, tray, 0, 1, 0), false, 'default preserves the rescue');
+});
+
+test('validateSave/defaultMeta: difficulty defaults to easy and validates', () => {
+  assert.strictEqual(G.defaultMeta().difficulty, 'easy');
+  assert.strictEqual(G.validateSave({ v: 2 }).difficulty, 'easy', 'pre-difficulty save migrates to easy');
+  assert.strictEqual(G.validateSave({ difficulty: 'hard' }).difficulty, 'hard');
+  assert.strictEqual(G.validateSave({ difficulty: 'bogus' }).difficulty, 'easy');
+});
+
 /* ---- Report ---- */
 
 if (failures.length) {

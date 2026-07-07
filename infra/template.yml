@@ -4,11 +4,21 @@ Description: >
   one Node.js Lambda behind a Function URL. Everything sits in the
   permanent free tier at friends-and-family traffic levels.
 
+Parameters:
+  NameSuffix:
+    Type: String
+    Default: ''
+    Description: >
+      Appended to the table and function names so a second stack can stand up
+      an isolated beta backend. Empty ('') for the production stack; pass
+      NameSuffix=-beta for the beta stack (table/function lizard-leaderboard-beta).
+      CORS origin is the same host for both channels, so no other change is needed.
+
 Resources:
   Table:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: lizard-leaderboard
+      TableName: !Sub 'lizard-leaderboard${NameSuffix}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: pk
@@ -63,7 +73,7 @@ Resources:
   Fn:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: lizard-leaderboard
+      FunctionName: !Sub 'lizard-leaderboard${NameSuffix}'
       Runtime: nodejs22.x
       Handler: index.handler
       MemorySize: 128

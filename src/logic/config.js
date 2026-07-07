@@ -12,23 +12,30 @@ const SAVE_KEY = IS_BETA ? 'lizard-blockdoku-beta' : 'lizard-blockdoku-v1';
    APP_BUILD must be bumped together with the sw.js CACHE version on every
    deploy: they are numerically aligned (build 13 = cache v13). */
 const APP_VERSION = 'v2.5';
-const APP_BUILD = 37;
+const APP_BUILD = 38;
 
 /* Global leaderboard endpoint (Lambda Function URL). Only enabled when the
    game is served from github.io: the API's CORS is pinned to that origin,
    so calls from anywhere else (localhost dev, the test suite) could never
    succeed and would only spam console errors. The game stays fully playable
    offline either way. window.__LB_URL__ is the smoke suite's mock hook. */
+/* Each channel has its own backend so beta playtesting never touches real
+   scores. Production is live; BETA_LB_URL is empty until the lizard-leaderboard-beta
+   stack is deployed and its Function URL pasted here (see infra/DEPLOY.md
+   section 8). Empty means beta stays fully playable with no live board, and it
+   NEVER falls back to the production table. */
+const PROD_LB_URL = 'https://5hejgq4fhsbt7wcyq7p4pa55wi0iurts.lambda-url.us-east-1.on.aws';
+const BETA_LB_URL = '';
 const LEADERBOARD_URL = (typeof window !== 'undefined' && window.__LB_URL__)
   || (typeof location !== 'undefined' && location.hostname.endsWith('github.io')
-    ? 'https://5hejgq4fhsbt7wcyq7p4pa55wi0iurts.lambda-url.us-east-1.on.aws'
+    ? (IS_BETA ? BETA_LB_URL : PROD_LB_URL)
     : '');
 const LB_KEY = 'lizard-blockdoku-lb';
 
-/* Test switch: when true the beta may submit real scores. Kept off so beta
-   playtesting never pollutes the real board (flipped on once, 2026-07-03,
-   to verify the live pipeline end to end). */
-const BETA_LB_SUBMITS = false;
+/* Beta now submits to its OWN backend (BETA_LB_URL), so this is on: beta can be
+   tested end to end without polluting the production board. It stays inert until
+   BETA_LB_URL is set (an empty LEADERBOARD_URL blocks all submits). */
+const BETA_LB_SUBMITS = true;
 
 /* Beta perk, permanent by design: fresh beta games start with one of each
    item so end-state rescues and item flows are always easy to test.

@@ -20,6 +20,8 @@ const {
   SCENARIOS, buildScenario, SHAPE_CLASS_META,
   setShapeClassFilter, setIconFilter, setRerollForce1x1,
   JOURNAL_MAX, zeroInv, fillInv,
+  DIFFICULTY_IDS, setActiveDifficulty, currentDifficulty, setDifficultyWeights,
+  difficultyWeightMul, mercyAttempts, starterCount, itemRateMul, rescuesEnabled,
 } = L;
 
 /* ================================================================
@@ -873,19 +875,19 @@ function initUI() {
       gained, comboN: didFreeze ? 0 : n, perfectCount,
       streak: didFreeze ? 0 : streak,
       msCombo: !didFreeze && msBonuses.length > 0,
-    });
+    }, itemRateMul());
     progress = earnResult.progress;
     const granted = grantItems(inv, earnResult.earned);
 
     /* 4. Refill when all three slots are used */
     const refilled = tray.every((p) => p === null);
-    if (refilled) tray = genTray(board, rng);
+    if (refilled) tray = genTray(board, rng, mercyAttempts());
 
     /* 5. Fit test on the post-clear board. Item-aware: a Rotate or Flip in
        stock (or an open session) can rescue a piece and a held Reroll always
        offers a way out, so the plain test short-circuits the cheap common
        case before the orbit walk. */
-    let over = isGameOver(board, tray) && isGameOverWithItems(board, tray, inv.rotate, inv.reroll, inv.flip);
+    let over = isGameOver(board, tray) && isGameOverWithItems(board, tray, inv.rotate, inv.reroll, inv.flip, rescuesEnabled());
 
     /* A pending freeze force-melts at game over; the space it frees can
        rescue the game, so the fit test runs again afterwards. */
@@ -2194,6 +2196,10 @@ function initUI() {
        successful send, kept so offline retries have something to resend. */
     let sentHigh = 0;
     let pending = 0;
+    /* The difficulty the pending score was played on, captured when the score
+       arrives so an offline retry submits it to the right board even if she has
+       since switched difficulty. */
+    let pendingDiff = 'easy';
 
     function identity() {
       try {
@@ -2231,7 +2237,10 @@ function initUI() {
        reconnect. */
     async function submitScore(s) {
       if (!LEADERBOARD_URL || (IS_BETA && !BETA_LB_SUBMITS)) return;
-      if (typeof s === 'number' && Number.isFinite(s)) pending = Math.max(pending, s);
+      if (typeof s === 'number' && Number.isFinite(s)) {
+        if (s > pending) pendingDiff = meta.difficulty; /* new game's board */
+        pending = Math.max(pending, s);
+      }
       const value = pending;
       if (value < 1 || value <= sentHigh) return; /* nothing new to send this session */
       const idn = identity();
@@ -2244,6 +2253,7 @@ function initUI() {
             secret: idn.secret,
             name: meta.nickname || PLAYER_NAME,
             score: value,
+            difficulty: pendingDiff,
           }),
         });
         if (out && (out.accepted === true || out.accepted === false)) {
@@ -2254,18 +2264,19 @@ function initUI() {
       } catch (err) { /* offline or slow; the score stays pending for a retry */ }
     }
 
-    async function fetchTop(period) {
+    async function fetchTop(difficulty, period) {
+      const d = difficulty || 'easy';
       const p = period || 'all';
-      const out = await call('/top?period=' + encodeURIComponent(p), { method: 'GET' });
+      const out = await call('/top?difficulty=' + encodeURIComponent(d) + '&period=' + encodeURIComponent(p), { method: 'GET' });
       if (!out || !Array.isArray(out.scores)) throw new Error('bad payload');
       const scores = out.scores.slice(0, 50);
-      storeBlob(LB_KEY + '-cache-' + p, JSON.stringify(scores));
+      storeBlob(LB_KEY + '-cache-' + d + '-' + p, JSON.stringify(scores));
       return scores;
     }
 
-    function cachedTop(period) {
+    function cachedTop(difficulty, period) {
       try {
-        const raw = JSON.parse(localStorage.getItem(LB_KEY + '-cache-' + (period || 'all')));
+        const raw = JSON.parse(localStorage.getItem(LB_KEY + '-cache-' + (difficulty || 'easy') + '-' + (period || 'all')));
         return Array.isArray(raw) ? raw : null;
       } catch (err) { return null; }
     }
@@ -2276,7 +2287,9 @@ function initUI() {
   const lbPanelEl = $('lbPanel');
   const lbBodyEl = $('lbBody');
   const lbTabEls = Array.from(document.querySelectorAll('.lb-tab'));
-  let lbPeriod = 'all'; /* the active leaderboard tab */
+  const lbDiffEls = Array.from(document.querySelectorAll('.lb-diff'));
+  let lbPeriod = 'all'; /* the active period tab */
+  let lbDifficulty = 'easy'; /* the active difficulty tab */
 
   /* Names come from strangers on the internet: textContent only, always. */
   function renderLb(scores, statusText) {
@@ -2314,17 +2327,20 @@ function initUI() {
     });
   }
 
-  /* Show one period: its cached scores instantly, then a fresh fetch. The
-     period guard drops a slow response for a tab the user has since left. */
-  function showPeriod(period) {
+  /* Show one board (difficulty + period): its cached scores instantly, then a
+     fresh fetch. The guard drops a slow response for a board the user has since
+     left (either dimension changed). */
+  function showBoard(difficulty, period) {
+    lbDifficulty = difficulty;
     lbPeriod = period;
+    lbDiffEls.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.difficulty === difficulty)));
     lbTabEls.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.period === period)));
-    const cached = lb.cachedTop(period);
+    const cached = lb.cachedTop(difficulty, period);
     renderLb(cached, cached ? 'Refreshing...' : 'Loading...');
-    lb.fetchTop(period).then((scores) => {
-      if (lbPeriod === period) renderLb(scores);
+    lb.fetchTop(difficulty, period).then((scores) => {
+      if (lbDifficulty === difficulty && lbPeriod === period) renderLb(scores);
     }).catch(() => {
-      if (lbPeriod === period) {
+      if (lbDifficulty === difficulty && lbPeriod === period) {
         renderLb(cached, cached ? 'Offline: showing the last scores' : 'Could not reach the leaderboard');
       }
     });
@@ -2333,13 +2349,19 @@ function initUI() {
   function openLeaderboard() {
     lbPanelEl.hidden = false;
     if (!nickPending) lb.submitScore(); /* natural retry point for an unsent score */
-    showPeriod('all'); /* always reopen on the all-time tab */
+    showBoard(meta.difficulty, 'all'); /* her own board first, all-time */
   }
 
   lbTabEls.forEach((b) => b.addEventListener('click', () => {
     if (b.dataset.period === lbPeriod) return;
     sound.tap();
-    showPeriod(b.dataset.period);
+    showBoard(lbDifficulty, b.dataset.period);
+  }));
+
+  lbDiffEls.forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.difficulty === lbDifficulty) return;
+    sound.tap();
+    showBoard(b.dataset.difficulty, lbPeriod);
   }));
 
   if (LEADERBOARD_URL) {
@@ -2500,14 +2522,40 @@ function initUI() {
     persist();
   }
 
+  /* Difficulty is locked for the duration of a game: switching it starts a
+     fresh game (confirmed first if progress would be lost). pendingDifficulty
+     rides through the shared #confirmRestart dialog. */
+  let pendingDifficulty = null;
+  function applyDifficulty(id) {
+    setActiveDifficulty(id);
+    setDifficultyWeights(difficultyWeightMul());
+    meta.difficulty = id;
+  }
+  function gameInProgress() {
+    return score > 0 || board.some((v) => v !== -1);
+  }
+
   $('playAgain').addEventListener('click', () => { sound.tap(); resolveNickPrompt(); resetGame(); });
   $('restartBtn').addEventListener('click', () => {
     if (state !== 'IDLE' || tutorial) return;
     sound.tap();
     confirmEl.hidden = false;
   });
-  $('confirmYes').addEventListener('click', () => { sound.tap(); resetGame(); });
-  $('confirmNo').addEventListener('click', () => { sound.tap(); confirmEl.hidden = true; });
+  $('confirmYes').addEventListener('click', () => {
+    sound.tap();
+    if (pendingDifficulty) { applyDifficulty(pendingDifficulty); pendingDifficulty = null; persist(); }
+    resetGame();
+  });
+  $('confirmNo').addEventListener('click', () => {
+    sound.tap();
+    confirmEl.hidden = true;
+    /* A cancelled difficulty change reverts the selection and returns to Settings. */
+    if (pendingDifficulty) {
+      pendingDifficulty = null;
+      settingsEl.hidden = false;
+      syncSettingsUI();
+    }
+  });
 
   const muteBtn = $('muteBtn');
   function updateMuteBtn() {
@@ -2527,6 +2575,7 @@ function initUI() {
   const nickInput = $('nickInput');
   const themeButtons = Array.from(document.querySelectorAll('#themeSeg button'));
   const iconSetButtons = Array.from(document.querySelectorAll('#iconSetSeg button'));
+  const difficultyButtons = Array.from(document.querySelectorAll('#difficultySeg button'));
   const themeMedia = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
   /* Build/version line: composed once from the constants (never hardcoded)
@@ -2558,6 +2607,9 @@ function initUI() {
     }
     for (const b of iconSetButtons) {
       b.setAttribute('aria-pressed', String(b.dataset.iconsetChoice === meta.iconSet));
+    }
+    for (const b of difficultyButtons) {
+      b.setAttribute('aria-pressed', String(b.dataset.difficultyChoice === meta.difficulty));
     }
   }
 
@@ -2670,6 +2722,25 @@ function initUI() {
     syncSettingsUI();
   }));
 
+  /* Difficulty: locked per game. Mid-game (or with any placed piece) it needs
+     a confirm because switching starts over; on a clean board it applies at
+     once and regenerates the tray under the new bias. */
+  difficultyButtons.forEach((b) => b.addEventListener('click', () => {
+    const id = b.dataset.difficultyChoice;
+    if (id === meta.difficulty) return;
+    sound.tap();
+    if (gameInProgress()) {
+      pendingDifficulty = id;
+      settingsEl.hidden = true; /* let the confirm paint on top (it is earlier in the DOM) */
+      confirmEl.hidden = false;
+    } else {
+      applyDifficulty(id);
+      persist();
+      syncSettingsUI();
+      resetGame();
+    }
+  }));
+
   nickInput.addEventListener('change', () => {
     meta.nickname = sanitizeNickname(nickInput.value);
     nickInput.value = meta.nickname;
@@ -2702,7 +2773,7 @@ function initUI() {
       if (tutorial) return; /* the tutorial never touches the real save */
       meta.best = best;
       meta.muted = sound.isMuted();
-      const over = state === 'GAME_OVER' || isGameOverWithItems(board, tray, inv.rotate, inv.reroll, inv.flip);
+      const over = state === 'GAME_OVER' || isGameOverWithItems(board, tray, inv.rotate, inv.reroll, inv.flip, rescuesEnabled());
       const game = over ? null : encodeGame({ board, tray, score, inv, progress, frozen, freezeHold, streak, scoreLog, streakLog });
       storeBlob(SAVE_KEY, JSON.stringify({ v: 2, ...meta, game }));
     } catch (err) { /* storage may be unavailable; play on */ }
@@ -2711,14 +2782,16 @@ function initUI() {
   function freshGameState() {
     board = emptyBoard();
     score = 0;
-    inv = BETA_STARTER_ITEMS ? fillInv(1) : zeroInv();
+    /* Beta always starts stocked for testing; otherwise the difficulty's
+       starter count (0 for every tier today, so prod is unchanged). */
+    inv = BETA_STARTER_ITEMS ? fillInv(1) : fillInv(starterCount());
     progress = { pts: 0, flipPts: 0, combos: 0, fcombos: 0 };
     frozen = new Uint8Array(CELL_COUNT);
     freezeHold = false;
     streak = 0;
     scoreLog = [];
     streakLog = [];
-    tray = genTray(board, rng);
+    tray = genTray(board, rng, mercyAttempts());
   }
 
   function restore() {
@@ -2729,8 +2802,12 @@ function initUI() {
     const { game, ...savedMeta } = save;
     meta = savedMeta;
     best = save.best;
+    /* Apply difficulty before any tray is (re)generated below, so a fresh game
+       uses the saved level's generation bias, mercy, and starter count. */
+    setActiveDifficulty(meta.difficulty);
+    setDifficultyWeights(difficultyWeightMul());
     sound.setMuted(save.muted);
-    if (game && !isGameOverWithItems(game.board, game.tray, game.inv.rotate, game.inv.reroll, game.inv.flip)) {
+    if (game && !isGameOverWithItems(game.board, game.tray, game.inv.rotate, game.inv.reroll, game.inv.flip, rescuesEnabled())) {
       board = game.board;
       tray = game.tray;
       score = game.score;
@@ -2741,7 +2818,7 @@ function initUI() {
       streak = game.streak;
       scoreLog = game.scoreLog;
       streakLog = game.streakLog;
-      if (tray.every((p) => p === null)) tray = genTray(board, rng);
+      if (tray.every((p) => p === null)) tray = genTray(board, rng, mercyAttempts());
     } else {
       freshGameState();
     }
@@ -2957,7 +3034,7 @@ function initUI() {
       logAction('import ' + (which === 'before' ? 'pre-move state' : 'state'));
       board = g.board;
       tray = g.tray;
-      if (tray.every((p) => p === null)) tray = genTray(board, rng);
+      if (tray.every((p) => p === null)) tray = genTray(board, rng, mercyAttempts());
       score = g.score;
       inv = g.inv;
       progress = g.progress;
@@ -2979,7 +3056,7 @@ function initUI() {
       /* A dead-end import (game over, no rescuing items) renders fine for
          inspection, but persist() nulls finished games, so a reload will
          discard it. Say so up front instead of letting it vanish quietly. */
-      if (isGameOver(board, tray) && isGameOverWithItems(board, tray, inv.rotate, inv.reroll, inv.flip)) {
+      if (isGameOver(board, tray) && isGameOverWithItems(board, tray, inv.rotate, inv.reroll, inv.flip, rescuesEnabled())) {
         showToast('item-toast', '\u{1F41E} Loaded a dead-end state: look now, it will not survive a reload');
       } else {
         showToast('item-toast', '\u{1F41E} State loaded');

@@ -169,6 +169,14 @@
         </div>
       </div>
       <div class="set-row">
+        <span class="set-label" id="difficultyLabel">Difficulty</span>
+        <div class="seg" id="difficultySeg" role="group" aria-labelledby="difficultyLabel">
+          <button type="button" data-difficulty-choice="easy" aria-pressed="true">Easy</button>
+          <button type="button" data-difficulty-choice="normal" aria-pressed="false">Normal</button>
+          <button type="button" data-difficulty-choice="hard" aria-pressed="false">Hard</button>
+        </div>
+      </div>
+      <div class="set-row">
         <label for="nickInput">Nickname</label>
         <input type="text" id="nickInput" maxlength="16" placeholder="Lizard" autocomplete="off" spellcheck="false">
       </div>
@@ -224,6 +232,11 @@
   <div id="lbPanel" class="overlay" hidden>
     <div class="card sheet">
       <h2>&#x1F3C6; Leaderboard</h2>
+      <div class="seg lb-diffs" id="lbDiffs" role="group" aria-label="Leaderboard difficulty">
+        <button type="button" class="lb-diff" data-difficulty="easy" aria-pressed="true">Easy</button>
+        <button type="button" class="lb-diff" data-difficulty="normal" aria-pressed="false">Normal</button>
+        <button type="button" class="lb-diff" data-difficulty="hard" aria-pressed="false">Hard</button>
+      </div>
       <div class="seg lb-tabs" id="lbTabs" role="group" aria-label="Leaderboard period">
         <button type="button" class="lb-tab" data-period="all" aria-pressed="true">All-time</button>
         <button type="button" class="lb-tab" data-period="week" aria-pressed="false">This week</button>

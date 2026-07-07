@@ -73,12 +73,38 @@ let allowedIcons = null; /* Set<icon index> */
 let allowedIconWeight = 0;
 let rerollForce1x1 = false;
 
+/* Difficulty generation bias: a per-class multiplier array (base 1), or null
+   for "no bias". null keeps pickShapeId on its original fast path so Easy's
+   distribution is byte-for-byte the historic one. Composes with the beta
+   shape filter above. effTotal* are the difficulty-weighted sums, recomputed
+   whenever the bias or the filter changes so a pick never re-sums per call. */
+let difficultyMul = null;
+let effTotalAll = TOTAL_SHAPE_WEIGHT;
+let effTotalAllowed = 0;
+
+/* This shape's weight after the difficulty bias (identity when no bias). */
+function effWeight(id) {
+  return difficultyMul ? SHAPES[id].weight * difficultyMul[SHAPE_CLASS_OF[id]] : SHAPES[id].weight;
+}
+
+function recomputeEffTotals() {
+  effTotalAll = 0;
+  for (let id = 0; id < SHAPES.length; id++) effTotalAll += effWeight(id);
+  effTotalAllowed = 0;
+  if (allowedShapeIds) for (const id of allowedShapeIds) effTotalAllowed += effWeight(id);
+}
+
+function setDifficultyWeights(mulByClass) {
+  difficultyMul = (Array.isArray(mulByClass) && mulByClass.length === SHAPE_CLASSES.length) ? mulByClass : null;
+  recomputeEffTotals();
+}
+
 function setShapeClassFilter(classIdxs) {
   allowedShapeIds = null;
   allowedShapeWeight = 0;
-  if (!Array.isArray(classIdxs)) return;
+  if (!Array.isArray(classIdxs)) { recomputeEffTotals(); return; }
   const cls = new Set(classIdxs.filter((v) => Number.isInteger(v) && v >= 0 && v < SHAPE_CLASSES.length));
-  if (cls.size === 0 || cls.size >= SHAPE_CLASSES.length) return;
+  if (cls.size === 0 || cls.size >= SHAPE_CLASSES.length) { recomputeEffTotals(); return; }
   allowedShapeIds = new Set();
   for (let id = 0; id < SHAPES.length; id++) {
     if (cls.has(SHAPE_CLASS_OF[id])) {
@@ -86,6 +112,7 @@ function setShapeClassFilter(classIdxs) {
       allowedShapeWeight += SHAPES[id].weight;
     }
   }
+  recomputeEffTotals();
 }
 
 function setIconFilter(iconIdxs) {
@@ -123,18 +150,27 @@ function nextAllowedShapeId(id) {
    the walk is the same, restricted to the allowed members and their weight. */
 function pickShapeId(rng) {
   if (!allowedShapeIds) {
-    let t = rng() * TOTAL_SHAPE_WEIGHT;
+    /* No bias: the exact historic path, so Easy is byte-for-byte unchanged. */
+    if (!difficultyMul) {
+      let t = rng() * TOTAL_SHAPE_WEIGHT;
+      for (let i = 0; i < SHAPES.length; i++) {
+        t -= SHAPES[i].weight;
+        if (t < 0) return i;
+      }
+      return SHAPES.length - 1;
+    }
+    let t = rng() * effTotalAll;
     for (let i = 0; i < SHAPES.length; i++) {
-      t -= SHAPES[i].weight;
+      t -= effWeight(i);
       if (t < 0) return i;
     }
     return SHAPES.length - 1;
   }
-  let t = rng() * allowedShapeWeight;
+  let t = rng() * (difficultyMul ? effTotalAllowed : allowedShapeWeight);
   let last = 0;
   for (const i of allowedShapeIds) {
     last = i;
-    t -= SHAPES[i].weight;
+    t -= effWeight(i);
     if (t < 0) return i;
   }
   return last;
@@ -162,4 +198,4 @@ function pickIcon(rng) {
 export { SHAPE_CLASSES, SHAPE_CLASS_NAMES, SHAPE_CLASS_OF, SHAPE_CLASS_META, SHAPES,
   TOTAL_SHAPE_WEIGHT, TOTAL_ICON_WEIGHT, pickShapeId, pickIcon,
   setShapeClassFilter, setIconFilter, setRerollForce1x1, isRerollForce1x1,
-  iconFilterList, nextAllowedShapeId };
+  setDifficultyWeights, iconFilterList, nextAllowedShapeId };

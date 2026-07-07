@@ -4,8 +4,9 @@
 const RELEASE_NOTES = [
   {
     version: 'v2.5',
-    date: '2026-07-05',
+    date: '2026-07-06',
     notes: [
+      'Difficulty levels! Pick Easy, Normal, or Hard in Settings. Your current game is Easy, exactly as it plays today; Normal and Hard deal trickier pieces and are less forgiving. Each level has its own set of leaderboards, so switch the difficulty at the top of the Leaderboard to see its boards.',
       'Daily and weekly leaderboards! The Leaderboard now has three tabs: All-time, This week, and Today, so a great single game can top a board even when it is below the all-time best. Tap a tab to switch.',
       'Reach the top faster: as you drag a piece upward it now leads further ahead of your finger, so you barely have to move to place along the top rows.',
       'Changed your mind about a freeze? A dipped piece now shows a ✕ to un-dip it and get the Freeze back.',

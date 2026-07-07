@@ -5,7 +5,7 @@
    Mirrors the lightweight harness of tests/logic.test.js. */
 
 import assert from 'node:assert';
-import { periodKeys, periodKeyFor, isoWeekYear } from '../backend/periods.mjs';
+import { periodKeys, periodKeyFor, isoWeekYear, boardKeys, boardKeyFor } from '../backend/periods.mjs';
 
 let passed = 0;
 const failures = [];
@@ -77,6 +77,44 @@ test('periodKeyFor maps names and defaults unknown to all-time', () => {
   assert.strictEqual(periodKeyFor('week', t), keys.week);
   assert.strictEqual(periodKeyFor('nonsense', t), 'ALL');
   assert.strictEqual(periodKeyFor(undefined, t), 'ALL');
+});
+
+/* ---- Difficulty dimension: boardKeys / boardKeyFor ---- */
+
+test('easy keeps the bare period keys (zero migration)', () => {
+  const t = Date.UTC(2026, 6, 4, 12);
+  const base = periodKeys(t);
+  const easy = boardKeys('easy', t);
+  assert.strictEqual(easy.all, base.all);   // 'ALL'
+  assert.strictEqual(easy.day, base.day);   // 'D#2026-07-04'
+  assert.strictEqual(easy.week, base.week); // 'W#2026-W27'
+});
+
+test('normal/hard prefix every period key', () => {
+  const t = Date.UTC(2026, 6, 4, 12);
+  const base = periodKeys(t);
+  const hard = boardKeys('hard', t);
+  assert.strictEqual(hard.all, 'hard#' + base.all);
+  assert.strictEqual(hard.day, 'hard#' + base.day);
+  assert.strictEqual(hard.week, 'hard#' + base.week);
+  assert.strictEqual(boardKeys('normal', t).all, 'normal#' + base.all);
+});
+
+test('unknown or missing difficulty falls back to easy (bare key)', () => {
+  const t = Date.UTC(2026, 6, 4, 12);
+  const base = periodKeys(t);
+  assert.strictEqual(boardKeys('nonsense', t).all, base.all);
+  assert.strictEqual(boardKeys(undefined, t).all, base.all);
+});
+
+test('boardKeyFor composes difficulty with the period name', () => {
+  const t = Date.UTC(2026, 6, 4, 12);
+  assert.strictEqual(boardKeyFor('easy', 'day', t), 'D#2026-07-04');
+  assert.strictEqual(boardKeyFor('hard', 'day', t), 'hard#D#2026-07-04');
+  assert.strictEqual(boardKeyFor('normal', 'week', t), 'normal#W#2026-W27');
+  // Unknown period still falls back to all-time; difficulty still applies.
+  assert.strictEqual(boardKeyFor('hard', 'xyz', t), 'hard#ALL');
+  assert.strictEqual(boardKeyFor('bogus', 'all', t), 'ALL');
 });
 
 /* ---- Report ---- */

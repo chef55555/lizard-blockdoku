@@ -154,8 +154,40 @@ budgets on an account are free. Alerts email thomas.sheffer@gmail.com at
 4. Commit, push to the beta repo (`git push beta v2:main`), verify with
    `node tests/live-check.mjs https://chef55555.github.io/lizard-blockdoku-beta/`.
 5. Note: the browser can only call the API from `https://chef55555.github.io`
-   because CORS is pinned there. The beta site can VIEW the top 50 but never
-   submits (IS_BETA guard); real submits only happen from the production URL.
+   because CORS is pinned there. Beta and production are the same origin host
+   (different path), so both are allowed. As of the difficulty release, beta
+   points at its OWN backend (section 8) and DOES submit there; production is a
+   separate table, so beta playtesting never touches real scores.
+
+## 8. Beta backend (separate stack)
+
+The beta channel has its own isolated table + function + Function URL so
+leaderboard changes can be tested end to end without touching production data.
+It is the SAME template, deployed a second time with a name suffix.
+
+```
+# Deploy the beta stack (own table/function: lizard-leaderboard-beta)
+aws cloudformation deploy --stack-name lizard-leaderboard-beta --template-file infra/template.yml --parameter-overrides NameSuffix=-beta --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset
+
+# Push the SAME handler code to the beta function
+Compress-Archive -Path backend\index.mjs, backend\periods.mjs -DestinationPath backend\fn.zip -Force
+aws lambda update-function-code --function-name lizard-leaderboard-beta --zip-file fileb://backend/fn.zip
+
+# Get the beta Function URL and paste it into BETA_LB_URL in src/logic/config.js
+aws cloudformation describe-stacks --stack-name lizard-leaderboard-beta --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue" --output text
+```
+
+Then in `src/logic/config.js` set `BETA_LB_URL` to that URL (no trailing slash).
+`LEADERBOARD_URL` already picks it when `IS_BETA`, and `BETA_LB_SUBMITS` is on,
+so the beta site reads and writes its own board. Production is untouched: it
+keeps `--stack-name lizard-leaderboard` (default empty `NameSuffix`) and the
+prod URL. Redeploy production code the usual way (section 3) whenever the
+handler changes; both functions must run the same `backend/*.mjs`.
+
+Difficulty note: `/submit` and `/top` now take a `difficulty` (body field /
+`?difficulty=`). Easy reuses the bare period keys, so existing rows are the Easy
+board; Normal/Hard prefix the key. Smoke it by adding `?difficulty=hard` to the
+`/top` calls and a `"difficulty":"hard"` field to the `/submit` body.
 
 ## Gotchas from the first real deploy (2026-07-03, account 172627761914)
 

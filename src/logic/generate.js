@@ -9,12 +9,13 @@ function makePiece(rng) {
 }
 
 /* Fresh tray of 3. Variety rule: never 3 identical shapes in one tray.
-   Mercy rule: if none of the 3 fits, regenerate the whole tray (up to 20
-   attempts) then accept the last roll; the fit test ends the game honestly.
-   No mid-tray mercy by design. */
-function genTray(board, rng) {
+   Mercy rule: if none of the 3 fits, regenerate the whole tray (up to
+   `attempts` times, difficulty-tuned) then accept the last roll; the fit test
+   ends the game honestly. No mid-tray mercy by design. Default 20 keeps old
+   callers and tests unchanged. */
+function genTray(board, rng, attempts = 20) {
   let tray = [];
-  for (let attempt = 0; attempt < 20; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     tray = [];
     for (let slot = 0; slot < 3; slot++) {
       let piece = makePiece(rng);
@@ -116,10 +117,14 @@ function isGameOverWithRotate(board, tray, rotateCount, flipCount = 0) {
 /* Item-aware game over, the full escape-hatch check. A Reroll in stock is
    always a possible way out (the swapped piece might fit, and she deserves
    the chance to try), so a stuck tray only truly ends the game once no
-   Reroll is held and no rotation or flip can rescue any piece. */
-function isGameOverWithItems(board, tray, rotateCount, rerollCount, flipCount = 0) {
+   Reroll is held and no rotation or flip can rescue any piece. When `rescues`
+   is false (Hard difficulty) the item escape hatch is ignored entirely: a tray
+   whose pieces do not fit as-is ends the game even with items in hand. Default
+   true preserves the historic behavior for old callers. */
+function isGameOverWithItems(board, tray, rotateCount, rerollCount, flipCount = 0, rescues = true) {
   const remaining = tray.filter(Boolean);
   if (remaining.length === 0) return false;
+  if (!rescues) return remaining.every((p) => !fitsSomewhere(board, SHAPES[p.shapeId]));
   if (rerollCount > 0) return false;
   return isGameOverWithRotate(board, tray, rotateCount, flipCount);
 }

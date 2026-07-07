@@ -56,3 +56,32 @@ export function periodKeyFor(name, nowMs) {
   if (name === 'week') return keys.week;
   return keys.all;
 }
+
+/* ---- Difficulty dimension ----
+   A second, client-supplied board dimension folded into the same GSI key.
+   Easy KEEPS the bare period key ('ALL', 'D#…', 'W#…') so every score written
+   before difficulties existed is already the Easy board: zero migration.
+   Normal/Hard prefix the key ('normal#ALL', 'hard#D#…'). Unlike the period,
+   difficulty comes from the client (the server cannot derive it), so anything
+   unknown or missing falls back to Easy. */
+const DIFF_IDS = ['easy', 'normal', 'hard'];
+function normDiff(d) { return DIFF_IDS.includes(d) ? d : 'easy'; }
+function withDiff(difficulty, periodKey) {
+  const d = normDiff(difficulty);
+  return d === 'easy' ? periodKey : d + '#' + periodKey;
+}
+
+/* All three board keys for a submit, difficulty folded in. */
+export function boardKeys(difficulty, nowMs) {
+  const keys = periodKeys(nowMs);
+  return {
+    all: withDiff(difficulty, keys.all),
+    day: withDiff(difficulty, keys.day),
+    week: withDiff(difficulty, keys.week),
+  };
+}
+
+/* The single board key for a /top read (difficulty + period name). */
+export function boardKeyFor(difficulty, name, nowMs) {
+  return withDiff(difficulty, periodKeyFor(name, nowMs));
+}

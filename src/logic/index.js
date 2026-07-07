@@ -2,6 +2,7 @@
 
 export * from './config.js';
 export * from './pieces.js';
+export * from './difficulty.js';
 export * from './scoring.js';
 export * from './items.js';
 export * from './history.js';

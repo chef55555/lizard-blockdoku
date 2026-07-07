@@ -5,7 +5,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, UpdateCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { createHash } from 'node:crypto';
-import { periodKeys, periodKeyFor } from './periods.mjs';
+import { boardKeys, boardKeyFor } from './periods.mjs';
 
 const TABLE = process.env.TABLE_NAME;
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
@@ -45,10 +45,13 @@ export const handler = async (event) => {
 };
 
 async function top(event) {
-  /* ?period=all|day|week (default all). The server, never the client, maps
-     the name to a period key on its own clock. */
-  const period = (event.queryStringParameters && event.queryStringParameters.period) || 'all';
-  const key = periodKeyFor(period, Date.now());
+  /* ?difficulty=easy|normal|hard (default easy) & ?period=all|day|week (default
+     all). The server maps the period name to a key on its own clock; difficulty
+     is client-supplied (unknown falls back to easy inside boardKeyFor). */
+  const q = event.queryStringParameters || {};
+  const period = q.period || 'all';
+  const difficulty = q.difficulty || 'easy';
+  const key = boardKeyFor(difficulty, period, Date.now());
   const out = await ddb.send(new QueryCommand({
     TableName: TABLE,
     IndexName: 'top',
@@ -108,7 +111,7 @@ async function submit(event) {
   try { data = JSON.parse(rawBody); } catch (err) { return resp(400, { error: 'bad json' }); }
   if (!data || typeof data !== 'object') return resp(400, { error: 'bad body' });
 
-  const { playerId, secret, score } = data;
+  const { playerId, secret, score, difficulty } = data;
   const name = sanitizeName(data.name);
   if (typeof playerId !== 'string'
     || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(playerId)) {
@@ -136,7 +139,9 @@ async function submit(event) {
      derived from the server clock so client time is never trusted. Reuse the
      same integer second for the keys and the timestamps. */
   const secretHash = sha256(secret);
-  const keys = periodKeys(now * 1000);
+  /* Difficulty folded into every board key (easy = bare key, so pre-difficulty
+     rows are the Easy board with no migration). Unknown/missing → easy. */
+  const keys = boardKeys(difficulty, now * 1000);
   const base = 'P#' + playerId;
 
   /* The all-time row governs ownership and the returned best. A wrong secret

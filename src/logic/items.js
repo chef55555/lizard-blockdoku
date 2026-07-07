@@ -23,10 +23,14 @@ const STREAK_LOG_MAX = 12;
    Sets combo, and 1 each time the streak hits a multiple of 4. fcombos mirrors
    combos as the freeze counter's own tally so undo and freeze pace
    independently. */
-function computeEarned(progress, turn) {
+function computeEarned(progress, turn, rateMul = 1) {
+  /* rateMul (difficulty-tuned) scales only how fast points accrue toward the
+     next item, never the score itself. Rounded so pts/flipPts stay integers
+     (the save validator requires it). rateMul 1 (Easy) is a no-op. */
+  const add = Math.round(turn.gained * rateMul);
   const p = {
-    pts: progress.pts + turn.gained,
-    flipPts: (progress.flipPts || 0) + turn.gained,
+    pts: progress.pts + add,
+    flipPts: (progress.flipPts || 0) + add,
     combos: progress.combos,
     fcombos: progress.fcombos || 0,
   };

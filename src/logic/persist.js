@@ -2,6 +2,7 @@
 
 import { CELL_COUNT, ICONS, iconSetIds } from './config.js';
 import { SHAPES, SHAPE_CLASSES } from './pieces.js';
+import { DIFFICULTY_IDS } from './difficulty.js';
 import { clearScore } from './scoring.js';
 import { ITEM_KEYS, ITEM_CAPS, zeroInv, ROTATION_MAP, FLIP_MAP, SCORE_LOG_MAX, STREAK_LOG_MAX } from './items.js';
 import { cloneScoreLog, cloneStreakLog } from './history.js';
@@ -18,6 +19,9 @@ function defaultMeta() {
     volume: 50,
     theme: 'auto',
     iconSet: 'classic',
+    /* Easy is today's game; a fresh install and a v1 save both land here so
+       out-of-the-box behavior is unchanged. */
+    difficulty: 'easy',
     nickname: '',
     nickPrompted: false,
     seenTutorial: false,
@@ -252,6 +256,9 @@ function validateSave(raw) {
   out.volume = clampInt(raw.volume, 0, 100, 50);
   out.theme = ['auto', 'light', 'dark'].includes(raw.theme) ? raw.theme : 'auto';
   out.iconSet = iconSetIds().includes(raw.iconSet) ? raw.iconSet : 'classic';
+  /* Missing (v1/pre-difficulty save) or bogus value migrates to Easy, so an
+     in-progress game and its score belong to the Easy board. */
+  out.difficulty = DIFFICULTY_IDS.includes(raw.difficulty) ? raw.difficulty : 'easy';
   out.nickname = sanitizeNickname(raw.nickname);
   out.nickPrompted = raw.nickPrompted === true;
   out.seenTutorial = raw.seenTutorial === true;
