@@ -12,7 +12,7 @@ const SAVE_KEY = IS_BETA ? 'lizard-blockdoku-beta' : 'lizard-blockdoku-v1';
    APP_BUILD must be bumped together with the sw.js CACHE version on every
    deploy: they are numerically aligned (build 13 = cache v13). */
 const APP_VERSION = 'v2.5';
-const APP_BUILD = 38;
+const APP_BUILD = 39;
 
 /* Global leaderboard endpoint (Lambda Function URL). Only enabled when the
    game is served from github.io: the API's CORS is pinned to that origin,
@@ -20,12 +20,12 @@ const APP_BUILD = 38;
    succeed and would only spam console errors. The game stays fully playable
    offline either way. window.__LB_URL__ is the smoke suite's mock hook. */
 /* Each channel has its own backend so beta playtesting never touches real
-   scores. Production is live; BETA_LB_URL is empty until the lizard-leaderboard-beta
-   stack is deployed and its Function URL pasted here (see infra/DEPLOY.md
-   section 8). Empty means beta stays fully playable with no live board, and it
+   scores. Both are live: BETA_LB_URL points at the lizard-leaderboard-beta
+   stack's Function URL (deployed 2026-07-07; see infra/DEPLOY.md section 8).
+   If it were empty, beta would stay fully playable with no live board, and it
    NEVER falls back to the production table. */
 const PROD_LB_URL = 'https://5hejgq4fhsbt7wcyq7p4pa55wi0iurts.lambda-url.us-east-1.on.aws';
-const BETA_LB_URL = '';
+const BETA_LB_URL = 'https://isy2u7iiajjq2kl2p4fzuej6be0udols.lambda-url.us-east-1.on.aws';
 const LEADERBOARD_URL = (typeof window !== 'undefined' && window.__LB_URL__)
   || (typeof location !== 'undefined' && location.hostname.endsWith('github.io')
     ? (IS_BETA ? BETA_LB_URL : PROD_LB_URL)
